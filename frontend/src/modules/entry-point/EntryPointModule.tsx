@@ -127,7 +127,7 @@ export default function EntryPointModule() {
 
   if (decision === 'HOLD') {
     return (
-      <div className="space-y-6">
+      <div className="space-y-4 md:space-y-6">
         <Panel title="⏸ HOLD — Nincs belépési pont">
           <div className="bg-[var(--color-warn)]/10 border border-[var(--color-warn)] rounded-lg p-6 text-center">
             <AlertTriangle className="w-12 h-12 text-[var(--color-warn)] mx-auto mb-3" />
@@ -159,7 +159,7 @@ export default function EntryPointModule() {
   const upColor = decision === 'BUY' ? 'var(--color-bull)' : 'var(--color-bear)';
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 md:space-y-6">
       <Panel title="📥 Bemeneti paraméterek"
         action={
           <Button onClick={fetchAnalysis} disabled={loading} variant="ghost">

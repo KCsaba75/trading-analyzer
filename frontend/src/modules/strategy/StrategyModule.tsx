@@ -123,7 +123,7 @@ export default function StrategyModule() {
   }, [strategies]);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 md:space-y-6">
       <Panel
         title={editingId ? '✏️ Stratégia szerkesztése' : '➕ Új stratégia'}
         action={
@@ -249,7 +249,7 @@ export default function StrategyModule() {
                     TP: {s.take_profit_pct}%
                   </div>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
                   <Button variant="ghost" onClick={() => edit(s)}>
                     <Edit3 className="w-4 h-4" />
                   </Button>

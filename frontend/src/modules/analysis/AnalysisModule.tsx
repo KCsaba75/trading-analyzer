@@ -243,7 +243,7 @@ export default function AnalysisModule() {
 
           {result.pattern_stats && result.pattern_stats.total > 0 && (
             <Panel title={`🧬 Historical Pattern (60 nap 15m history, top ${result.pattern_stats.total} hasonló ablak)`}>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mb-4">
                 <Stat 
                   label="🟢 Bullish" 
                   value={`${result.pattern_stats.bullish} / ${result.pattern_stats.total}`} 
@@ -293,7 +293,7 @@ export default function AnalysisModule() {
 
           {result.trade_setup && (
             <Panel title="🎯 Trade Setup (entry / SL / TP)">
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mb-4">
                 <div className="bg-[var(--color-bg)] p-3 rounded-lg">
                   <div className="text-xs text-[var(--color-muted)]">📍 Belépés</div>
                   <div className="text-xl font-bold text-[var(--color-accent)]">${result.trade_setup.entry}</div>

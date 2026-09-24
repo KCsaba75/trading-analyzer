@@ -4,9 +4,9 @@ import { type ReactNode } from 'react';
 
 export function Panel({ title, children, action }: { title: string; children: ReactNode; action?: ReactNode }) {
   return (
-    <div className="bg-[var(--color-panel)] border border-[var(--color-border)] rounded-xl p-6 shadow-lg">
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-xl font-semibold text-[var(--color-text)]">{title}</h2>
+    <div className="bg-[var(--color-panel)] border border-[var(--color-border)] rounded-xl p-4 md:p-6 shadow-lg">
+      <div className="flex items-center justify-between mb-3 md:mb-4 gap-2">
+        <h2 className="text-base md:text-xl font-semibold text-[var(--color-text)] leading-tight">{title}</h2>
         {action}
       </div>
       {children}
