@@ -3,7 +3,8 @@
 // Futtatás: supabase functions deploy analyze-stock
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
-import yahooFinance from 'npm:yahoo-finance2';
+import yahooFinancePkg from 'npm:yahoo-finance2@2.13.0';
+const yahooFinance = new (yahooFinancePkg as any)();
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 // Indikátor számítások (egyszerűsített verziók)
