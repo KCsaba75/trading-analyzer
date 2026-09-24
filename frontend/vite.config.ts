@@ -11,4 +11,7 @@ export default defineConfig({
       '/api': 'http://localhost:54321',  // Supabase local dev
     },
   },
+  build: {
+    cssMinify: false,  // Ne optimalizálja a CSS-t, hogy megmaradjanak a @media query-k
+  },
 })
