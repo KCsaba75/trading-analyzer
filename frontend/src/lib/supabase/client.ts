@@ -102,6 +102,15 @@ export const positionsApi = {
   },
 
   async close(id: string, closePrice: number, pnl: number) {
+    // 1. Lekérdezzük a pozíciót, hogy megkapjuk a strategy_id-t
+    const { data: position, error: fetchError } = await supabase
+      .from('positions')
+      .select('strategy_id')
+      .eq('id', id)
+      .single();
+    if (fetchError) throw fetchError;
+
+    // 2. Pozíció lezárása
     const { data, error } = await supabase
       .from('positions')
       .update({
@@ -114,6 +123,26 @@ export const positionsApi = {
       .select()
       .single();
     if (error) throw error;
+
+    // 3. Stratégia tőkéjének frissítése a P&L-lel
+    if (position?.strategy_id) {
+      const { data: strategy, error: stratError } = await supabase
+        .from('strategies')
+        .select('initial_capital')
+        .eq('id', position.strategy_id)
+        .single();
+      if (!stratError && strategy) {
+        const newCapital = Number(strategy.initial_capital) + Number(pnl);
+        await supabase
+          .from('strategies')
+          .update({
+            initial_capital: newCapital,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', position.strategy_id);
+      }
+    }
+
     return data;
   },
 

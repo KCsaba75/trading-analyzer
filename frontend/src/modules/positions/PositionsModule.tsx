@@ -149,8 +149,8 @@ export default function PositionsModule() {
   };
 
   // Pozíció lezárása
-  const handleClose = async (positionId: string, entryPrice: number) => {
-    const closePriceStr = prompt(`Záróár (entry: ${safeFixed(entryPrice, 2)}):`);
+  const handleClose = async (positionId: string, entryPrice: number, ticker: string) => {
+    const closePriceStr = prompt(`Záróár ${ticker} (entry: ${safeFixed(entryPrice, 2)}):`);
     if (!closePriceStr) return;
     const closePrice = parseFloat(closePriceStr);
     if (isNaN(closePrice)) {
@@ -159,10 +159,16 @@ export default function PositionsModule() {
     }
     const pos = positions.find(p => p.id === positionId);
     const pnl = pos ? (closePrice - pos.entry_price) * (pos.position_size || 1) : 0;
+    const pnlStr = pnl >= 0 ? `+$${safeFixed(pnl, 2)} (nyereség)` : `-$${Math.abs(pnl).toFixed(2)} (veszteség)`;
+
+    if (!confirm(`Lezárás ${ticker} @ ${safeFixed(closePrice, 2)}\n\nP&L: ${pnlStr}\n\nEz a P&L hozzáadódik a stratégia tőkéjéhez!\n\nBiztosan lezárod?`)) return;
+
     setActionLoading(positionId);
     try {
       await positionsApi.close(positionId, closePrice, pnl);
       await loadData();
+      // Sikeres lezárás visszajelzés
+      alert(`✅ Pozíció lezárva!\n\nP&L: ${pnlStr}\nA stratégia tőkéje frissítve.`);
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -387,7 +393,7 @@ export default function PositionsModule() {
                 </div>
 
                 <Button
-                  onClick={() => handleClose(p.id, p.entry_price)}
+                  onClick={() => handleClose(p.id, p.entry_price, p.ticker)}
                   disabled={actionLoading === p.id}
                   variant="ghost"
                 >
