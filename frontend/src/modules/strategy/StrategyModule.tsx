@@ -4,7 +4,8 @@
 import { useState, useEffect } from 'react';
 import { type StrategyConfig, type RiskLevel, type StrategyType } from '../../types';
 import { Panel, Button, Input, Select, Badge } from '../../components/ui';
-import { Save, Trash2, Edit3 } from 'lucide-react';
+import { strategyApi, supabase } from '../../lib/supabase/client';
+import { Save, Trash2, Edit3, RefreshCw, Loader2 } from 'lucide-react';
 
 const RISK_PRESETS: Record<RiskLevel, { maxPos: number; stopLoss: number; takeProfit: number; maxTrades: number; maxPos2: number }> = {
   low:      { maxPos: 5,  stopLoss: 1.5, takeProfit: 3,   maxTrades: 3, maxPos2: 3 },
@@ -24,7 +25,7 @@ export default function StrategyModule() {
     name: 'Új stratégia',
     initial_capital: 10000,
     risk_level: 'medium',
-    strategy_type: 'swing',
+    strategy_type: 'day-trading',
     max_position_pct: 10,
     stop_loss_pct: 2.5,
     take_profit_pct: 5,
@@ -32,20 +33,34 @@ export default function StrategyModule() {
     max_open_positions: 5,
   });
 
-  const [strategies, setStrategies] = useState<StrategyConfig[]>([]);
+  const [strategies, setStrategies] = useState<any[]>([]);
   const [draft, setDraft] = useState<StrategyConfig>(blank());
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isDirty, setIsDirty] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  // LocalStorage fallback (amíg nincs Supabase auth)
-  useEffect(() => {
-    const stored = localStorage.getItem('trading-strategies');
-    if (stored) {
-      try {
-        const parsed = JSON.parse(stored);
-        setStrategies(parsed);
-      } catch { /* ignore */ }
+  // Stratégiák betöltése Supabase-ből
+  const loadStrategies = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const { data, error: sbError } = await supabase
+        .from('strategies')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (sbError) throw sbError;
+      setStrategies(data ?? []);
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
     }
+  };
+
+  useEffect(() => {
+    loadStrategies();
   }, []);
 
   // Amikor a user változtat valamit
@@ -67,39 +82,68 @@ export default function StrategyModule() {
     });
   };
 
-  // Mentés
-  const save = () => {
-    if (editingId) {
-      // Frissítés
-      setStrategies((arr) =>
-        arr.map((s) => (s.id === editingId ? { ...draft, id: editingId } : s))
-      );
-    } else {
-      // Új hozzáadása
-      const newStrategy: StrategyConfig = {
-        ...draft,
-        id: crypto.randomUUID(),
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
+  // Mentés Supabase-be
+  const save = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      const payload = {
+        name: draft.name,
+        initial_capital: draft.initial_capital,
+        risk_level: draft.risk_level,
+        strategy_type: draft.strategy_type,
+        max_position_pct: draft.max_position_pct,
+        stop_loss_pct: draft.stop_loss_pct,
+        take_profit_pct: draft.take_profit_pct,
+        max_daily_trades: draft.max_daily_trades,
+        max_open_positions: draft.max_open_positions,
+        is_active: true,
+        position_size_pct: draft.max_position_pct,
       };
-      setStrategies((arr) => [newStrategy, ...arr]);
+
+      if (editingId) {
+        await strategyApi.update(editingId, payload);
+      } else {
+        await strategyApi.create(payload);
+      }
+
+      await loadStrategies();
+      resetForm();
+    } catch (e: any) {
+      setError(`Mentési hiba: ${e.message}`);
+    } finally {
+      setSaving(false);
     }
-    persist();
-    resetForm();
   };
 
-  // Törlés
-  const remove = (id: string) => {
+  // Törlés Supabase-ből
+  const remove = async (id: string) => {
     if (!confirm('Biztosan törlöd ezt a stratégiát?')) return;
-    setStrategies((arr) => arr.filter((s) => s.id !== id));
-    persist();
-    if (editingId === id) resetForm();
+    setLoading(true);
+    try {
+      await strategyApi.delete(id);
+      await loadStrategies();
+      if (editingId === id) resetForm();
+    } catch (e: any) {
+      setError(`Törlési hiba: ${e.message}`);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  // Szerkesztés
-  const edit = (s: StrategyConfig) => {
-    setDraft(s);
-    setEditingId(s.id ?? null);
+  const edit = (s: any) => {
+    setDraft({
+      name: s.name,
+      initial_capital: Number(s.initial_capital),
+      risk_level: s.risk_level as RiskLevel,
+      strategy_type: s.strategy_type as StrategyType,
+      max_position_pct: Number(s.max_position_pct),
+      stop_loss_pct: Number(s.stop_loss_pct),
+      take_profit_pct: Number(s.take_profit_pct),
+      max_daily_trades: Number(s.max_daily_trades),
+      max_open_positions: Number(s.max_open_positions),
+    });
+    setEditingId(s.id);
     setIsDirty(true);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -109,18 +153,6 @@ export default function StrategyModule() {
     setEditingId(null);
     setIsDirty(false);
   };
-
-  // LocalStorage mentés (useEffect alább kezeli)
-  const persist = () => {
-    // state-ből mentünk useEffect-ben
-  };
-
-  // useEffect a mentéshez
-  useEffect(() => {
-    if (strategies.length > 0) {
-      localStorage.setItem('trading-strategies', JSON.stringify(strategies));
-    }
-  }, [strategies]);
 
   return (
     <div className="space-y-4 md:space-y-6">
@@ -208,13 +240,26 @@ export default function StrategyModule() {
           />
         </div>
 
-        <div className="mt-6 flex gap-3">
-          <Button onClick={save}>
-            <Save className="inline w-4 h-4 mr-2" />
-            {editingId ? 'Frissítés' : 'Mentés'}
+        <div className="mt-6 flex flex-wrap gap-3">
+          {error && (
+            <div className="w-full p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 text-sm">
+              {error}
+            </div>
+          )}
+          <Button onClick={save} disabled={!isDirty || saving}>
+            {saving ? (
+              <Loader2 className="inline w-4 h-4 mr-2 animate-spin" />
+            ) : (
+              <Save className="inline w-4 h-4 mr-2" />
+            )}
+            {editingId ? 'Frissítés Supabase-ben' : 'Mentés Supabase-be'}
           </Button>
           <Button variant="secondary" onClick={resetForm}>
             Új űrlap
+          </Button>
+          <Button variant="ghost" onClick={loadStrategies} disabled={loading}>
+            <RefreshCw className={`inline w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+            Frissítés
           </Button>
         </div>
       </Panel>
