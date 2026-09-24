@@ -37,7 +37,27 @@ export default function AnalysisModule() {
     setLoading(true);
     setError(null);
 
-    // 1. Supabase Edge Function (elsődleges — Vercel-en is működik)
+    // 1. Vercel API route (same-origin, nincs CORS/hálózati gond)
+    try {
+      const resp = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ticker, timeframe }),
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        if (!data.error) {
+          setResult(data);
+          setError(null);
+          setLoading(false);
+          return;
+        }
+      }
+    } catch {
+      // Same-origin sem megy, próbáljuk a Supabase-et közvetlenül
+    }
+
+    // 2. Supabase Edge Function (cross-origin fallback)
     try {
       const supabaseUrl = (import.meta as any).env?.VITE_SUPABASE_URL;
       const supabaseKey = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY;
@@ -59,7 +79,7 @@ export default function AnalysisModule() {
         }
       }
     } catch {
-      // Supabase nem elérhető, megyünk tovább
+      // Supabase sem elérhető
     }
 
     // 2. Demo adatok (ha Supabase sem elérhető)
