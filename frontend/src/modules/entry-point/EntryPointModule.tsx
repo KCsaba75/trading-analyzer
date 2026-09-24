@@ -1,6 +1,6 @@
 // 3. FÁZIS: Belépési pont modul — Ajánlott ár, stop-loss, take-profit
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { type StrategyConfig, type AnalysisResult, type EntryPoint } from '../../types';
 import { Panel, Button, Input, Select, Badge } from '../../components/ui';
 import { Target, Shield, TrendingUp, Calculator, AlertTriangle } from 'lucide-react';
@@ -22,11 +22,50 @@ interface RecommendedEntry {
 export default function EntryPointModule() {
   // Bemeneti adatok
   const [ticker, setTicker] = useState('AAPL');
-  const [currentPrice, setCurrentPrice] = useState('195.42');
+  const [currentPrice, setCurrentPrice] = useState('');
   const [capital, setCapital] = useState('10000');
   const [riskLevel, setRiskLevel] = useState<'low' | 'medium' | 'high'>('medium');
   const [decision, setDecision] = useState<'BUY' | 'SELL' | 'HOLD'>('BUY');
-  const [atrVolatility, setAtrVolatility] = useState('1.85'); // ATR USD-ben
+  const [atrVolatility, setAtrVolatility] = useState(''); // ATR USD-ben
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  
+  // Automatikus adatlekérés a Supabase Edge Function-ből induláskor
+  useEffect(() => {
+    fetchAnalysis();
+  }, []);
+  
+  const fetchAnalysis = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      // Same-origin Vercel API route
+      const resp = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ticker, timeframe: '1d' }),
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        if (!data.error && data.current_price) {
+          setCurrentPrice(String(data.current_price));
+          setAtrVolatility(String(data.atr || '0'));
+          if (data.jev_decision) {
+            setDecision(data.jev_decision);
+          }
+          setError(null);
+        } else if (data.error) {
+          setError('Elemzés nem elérhető: ' + data.error);
+        }
+      } else {
+        setError('Supabase hiba: HTTP ' + resp.status);
+      }
+    } catch (e: any) {
+      setError('Hálózati hiba: ' + e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // Kockázati paraméterek (a Stratégia modulból jönnek, de itt is beállíthatók)
   const riskPercent = riskLevel === 'low' ? 1 : riskLevel === 'medium' ? 2.5 : 4;
@@ -115,12 +154,28 @@ export default function EntryPointModule() {
 
   return (
     <div className="space-y-6">
-      <Panel title="📥 Bemeneti paraméterek">
+      <Panel title="📥 Bemeneti paraméterek"
+        action={
+          <Button onClick={fetchAnalysis} disabled={loading} variant="ghost">
+            {loading ? '⏳ Frissítés...' : '🔄 Frissítés'}
+          </Button>
+        }>
+        {loading && (
+          <div className="mb-4 p-3 bg-[var(--color-accent)]/10 border border-[var(--color-accent)] rounded-lg text-sm flex items-center gap-2">
+            <div className="animate-spin w-4 h-4 border-2 border-[var(--color-accent)] border-t-transparent rounded-full"></div>
+            <span>Valós idejű adatok lekérése a YFinance + Jev AI-tól...</span>
+          </div>
+        )}
+        {error && (
+          <div className="mb-4 p-3 bg-[var(--color-warn)]/10 border border-[var(--color-warn)] rounded-lg text-sm">
+            ⚠️ {error}
+          </div>
+        )}
         <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
           <Input label="Ticker" value={ticker} onChange={(v) => setTicker(v.toUpperCase())} />
-          <Input label="Jelenlegi ár (USD)" type="number" value={currentPrice} onChange={setCurrentPrice} step={0.01} />
+          <Input label={loading ? "Jelenlegi ár (USD) — betöltés..." : "Jelenlegi ár (USD)"} type="number" value={currentPrice} onChange={setCurrentPrice} step={0.01} placeholder={loading ? "..." : "0.00"} />
           <Input label="Tőke (USD)" type="number" value={capital} onChange={setCapital} step={100} />
-          <Input label="ATR volatilitás" type="number" value={atrVolatility} onChange={setAtrVolatility} step={0.01} />
+          <Input label={loading ? "ATR (USD) — betöltés..." : "ATR volatilitás (USD)"} type="number" value={atrVolatility} onChange={setAtrVolatility} step={0.01} placeholder={loading ? "..." : "0.00"} />
           <Select<'BUY' | 'SELL' | 'HOLD'>
             label="Jev döntés"
             value={decision}
@@ -131,6 +186,10 @@ export default function EntryPointModule() {
               { value: 'HOLD', label: '⚪ HOLD' },
             ]}
           />
+        </div>
+        <div className="mt-3 text-xs text-[var(--color-muted)]">
+          💡 Az ár, ATR és Jev döntés automatikusan lekérve a YFinance + Jev AI-ból a modul megnyitásakor.
+          A ticker/tőke módosítása esetén kattints a "🔄 Frissítés" gombra.
         </div>
       </Panel>
 
