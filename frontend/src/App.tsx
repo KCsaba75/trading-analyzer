@@ -3,8 +3,9 @@ import { TrendingUp, Menu, X } from 'lucide-react';
 import StrategyModule from './modules/strategy/StrategyModule';
 import AnalysisModule from './modules/analysis/AnalysisModule';
 import EntryPointModule from './modules/entry-point/EntryPointModule';
+import PositionsModule from './modules/positions/PositionsModule';
 
-type ModuleId = 'strategy' | 'analysis' | 'entry';
+type ModuleId = 'strategy' | 'analysis' | 'entry' | 'positions';
 
 const MODULES: Record<ModuleId, { name: string; description: string; component: any; phase: number; status: 'active' | 'planned' }> = {
   strategy: {
@@ -26,6 +27,13 @@ const MODULES: Record<ModuleId, { name: string; description: string; component: 
     description: 'Ajánlott ár, stop-loss, take-profit',
     component: EntryPointModule,
     phase: 3,
+    status: 'active',
+  },
+  positions: {
+    name: '4. Pozíciók',
+    description: 'Aktív pozíciók és várakozó ajánlások',
+    component: PositionsModule,
+    phase: 4,
     status: 'active',
   },
 };
@@ -100,7 +108,7 @@ function App() {
         </nav>
         <div className="mt-6 md:mt-8 p-4 bg-[var(--color-bg)] rounded-lg border border-[var(--color-border)]">
           <div className="text-xs text-[var(--color-muted)] mb-1">Fázis</div>
-          <div className="text-sm font-medium">3 / 3 — Teljes</div>
+          <div className="text-sm font-medium">4 / 4 — Teljes</div>
           <div className="mt-2 h-1 bg-[var(--color-border)] rounded">
             <div className="h-full w-full bg-[var(--color-accent)] rounded" />
           </div>

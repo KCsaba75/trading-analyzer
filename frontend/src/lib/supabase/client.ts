@@ -51,3 +51,77 @@ export const strategyApi = {
     if (error) throw error;
   },
 };
+
+// CRUD helper a positions táblához
+export const positionsApi = {
+  async list(userId?: string) {
+    let query = supabase
+      .from('positions')
+      .select('*, strategy:strategies(name)')
+      .order('opened_at', { ascending: false });
+    if (userId) query = query.eq('user_id', userId);
+    const { data, error } = await query;
+    if (error) throw error;
+    return data ?? [];
+  },
+
+  async listOpen(userId?: string) {
+    let query = supabase
+      .from('positions')
+      .select('*, strategy:strategies(name)')
+      .eq('status', 'open')
+      .order('opened_at', { ascending: false });
+    if (userId) query = query.eq('user_id', userId);
+    const { data, error } = await query;
+    if (error) throw error;
+    return data ?? [];
+  },
+
+  async create(position: any) {
+    const { data, error } = await supabase
+      .from('positions')
+      .insert(position)
+      .select()
+      .single();
+    if (error) throw error;
+    return data;
+  },
+
+  async activate(id: string) {
+    const { data, error } = await supabase
+      .from('positions')
+      .update({
+        status: 'open',
+        opened_at: new Date().toISOString(),
+      })
+      .eq('id', id)
+      .select()
+      .single();
+    if (error) throw error;
+    return data;
+  },
+
+  async close(id: string, closePrice: number, pnl: number) {
+    const { data, error } = await supabase
+      .from('positions')
+      .update({
+        status: 'closed',
+        closed_at: new Date().toISOString(),
+        close_price: closePrice,
+        pnl: pnl,
+      })
+      .eq('id', id)
+      .select()
+      .single();
+    if (error) throw error;
+    return data;
+  },
+
+  async delete(id: string) {
+    const { error } = await supabase
+      .from('positions')
+      .delete()
+      .eq('id', id);
+    if (error) throw error;
+  },
+};
