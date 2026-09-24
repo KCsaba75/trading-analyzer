@@ -1,8 +1,4 @@
 {
-  "crons": [
-    {
-      "path": "/api/trading-monitor",
-      "schedule": "*/15 * * * *"
-    }
-  ]
+  "buildCommand": "node node_modules/vite/bin/vite.js build",
+  "outputDirectory": "dist"
 }
