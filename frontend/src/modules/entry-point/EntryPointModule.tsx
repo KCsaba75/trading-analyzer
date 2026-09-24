@@ -19,6 +19,12 @@ interface RecommendedEntry {
   reasoning: string;
 }
 
+// Null-safe toFixed helper
+function safeFixed(value: any, digits: number = 2): string {
+  if (value == null || value === undefined || isNaN(Number(value))) return 'N/A';
+  return Number(value).toFixed(digits);
+}
+
 export default function EntryPointModule() {
   // Bemeneti adatok
   const [ticker, setTicker] = useState('AAPL');

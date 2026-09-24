@@ -36,6 +36,12 @@ function Stat({ label, value, color = '' }: { label: string; value: string; colo
   );
 }
 
+// Null-safe toFixed helper - ha a value null/undefined, 'N/A'-t ad vissza
+function safeFixed(value: any, digits: number = 2): string {
+  if (value == null || value === undefined || isNaN(Number(value))) return 'N/A';
+  return Number(value).toFixed(digits);
+}
+
 export default function AnalysisModule() {
   const [ticker, setTicker] = useState('AAPL');
   const [timeframe, setTimeframe] = useState('15m');
@@ -123,7 +129,7 @@ export default function AnalysisModule() {
       jev_decision: 'BUY',
       jev_confidence: 0.72,
       jev_reasoning: `Bullish súly: ${bullish.toFixed(2)}, Bearish súly: ${bearish.toFixed(2)}. 6/10 indikátor bullish szavazatot adott, dominál a momentum és a volumen.`,
-      weighted_score: parseFloat((bullish - bearish).toFixed(3)),
+      weighted_score: parseFloat(safeFixed(bullish - bearish, 3)) || 0,
       analyzed_at: new Date().toISOString(),
     };
   };
@@ -193,7 +199,7 @@ export default function AnalysisModule() {
               <div>
                 <div className="text-sm text-[var(--color-muted)]">Részvény</div>
                 <div className="text-3xl font-bold">{result.ticker}</div>
-                <div className="text-sm text-[var(--color-muted)]">${result.current_price?.toFixed(2)}</div>
+                <div className="text-sm text-[var(--color-muted)]">${safeFixed(result.current_price, 2)}</div>
               </div>
               <div>
                 <div className="text-sm text-[var(--color-muted)]">Döntés</div>
@@ -273,7 +279,7 @@ export default function AnalysisModule() {
                     {result.pattern_matches.slice(0, 5).map((m, idx) => (
                       <div key={idx} className="bg-[var(--color-bg)] p-2 rounded text-xs grid grid-cols-3 gap-2">
                         <span>Minta #{idx + 1}</span>
-                        <span className="text-[var(--color-accent)]">hasonlóság: {m.similarity.toFixed(3)}</span>
+                        <span className="text-[var(--color-accent)]">hasonlóság: {safeFixed(m.similarity, 3)}</span>
                         <span className={m.futureReturn5 >= 0 ? 'text-[var(--color-bull)]' : 'text-[var(--color-bear)]'}>
                           +5h: {m.futureReturn5 >= 0 ? '+' : ''}{m.futureReturn5}% | +10h: {m.futureReturn10 >= 0 ? '+' : ''}{m.futureReturn10}%
                         </span>
@@ -316,7 +322,7 @@ export default function AnalysisModule() {
                 </div>
                 <div>
                   <span className="text-[var(--color-muted)]">📊 R:R arány:</span>{' '}
-                  <span className="font-semibold">{result.trade_setup.risk_reward_ratio.toFixed(2)}</span>
+                  <span className="font-semibold">{safeFixed(result.trade_setup.risk_reward_ratio, 2)}</span>
                 </div>
               </div>
               <div className="mt-4 p-3 bg-[var(--color-bg)] rounded text-sm">
@@ -352,7 +358,7 @@ export default function AnalysisModule() {
                   <div className="flex items-center gap-2 text-xs text-[var(--color-muted)]">
                     <span>Érték: <span className="text-[var(--color-text)] font-mono">{vote.value}</span></span>
                     <span>·</span>
-                    <span>Súly: <span className="text-[var(--color-text)]">{(vote.weight * 100).toFixed(0)}%</span></span>
+                    <span>Súly: <span className="text-[var(--color-text)]">{safeFixed(vote.weight * 100, 0)}%</span></span>
                     <span>·</span>
                     <span>Konfidencia: <span className="text-[var(--color-text)]">{Math.round(vote.confidence * 100)}%</span></span>
                   </div>
