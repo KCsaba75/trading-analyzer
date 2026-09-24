@@ -29,16 +29,40 @@ export interface IndicatorVote {
   reason: string;              // Miért ezt a jelet adta
 }
 
+export interface PatternStats {
+  total: number;
+  bullish: number;
+  bearish: number;
+  neutral: number;
+  avgReturn5: number;
+  avgReturn10: number;
+  bestCase5: number;
+  bestCase10: number;
+  worstCase5: number;
+  bestMatchSimilarity: number;
+}
+
+export interface PatternMatch {
+  startIndex: number;
+  endIndex: number;
+  similarity: number;
+  futureReturn5: number;
+  futureReturn10: number;
+}
+
 export interface AnalysisResult {
   id?: string;
   ticker: string;
-  timeframe: string;           // '15m'
+  timeframe: string;
   current_price: number;
   votes: IndicatorVote[];
   jev_decision: 'BUY' | 'SELL' | 'HOLD';
-  jev_confidence: number;      // 0-1
+  jev_confidence: number;
   jev_reasoning: string;
-  weighted_score: number;      // -1 (bearish) ... +1 (bullish)
+  weighted_score: number;
+  atr?: number;
+  pattern_stats?: PatternStats | null;
+  pattern_matches?: PatternMatch[];
   analyzed_at: string;
 }
 

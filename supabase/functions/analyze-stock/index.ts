@@ -4,6 +4,13 @@
 // Futtatás: supabase functions deploy analyze-stock
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
+import { 
+  fingerprint, 
+  createWindows, 
+  findSimilarPatterns, 
+  computePatternStats,
+  type Fingerprint 
+} from './_helpers/pattern.ts';
 
 const YF_BASE_URL = 'https://query1.finance.yahoo.com/v8/finance/chart';
 
@@ -250,6 +257,127 @@ async function jevDecide(bullish: number, bearish: number): Promise<JevResult> {
 
 // === MAIN HANDLER ===
 
+
+
+// === HISTORICAL PATTERN ANALYSIS ===
+
+const YAHOO_PATTERN_URL = 'https://query1.finance.yahoo.com/v8/finance/chart';
+
+async function fetchHistoricalData(ticker: string): Promise<{
+  closes: number[]; highs: number[]; lows: number[]; opens: number[]; volumes: number[];
+} | null> {
+  try {
+    // 60 napos 15m adat = ~2600 adatpont (6.5 órás trading nap × 60 nap)
+    // Yfinance limitálja a 60d/15m kombinációt, tehát max 60 nap
+    const resp = await fetch(
+      `${YAHOO_PATTERN_URL}/${encodeURIComponent(ticker)}?interval=15m&range=60d`,
+      { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; trading-analyzer/1.0)' } }
+    );
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    const result = data?.chart?.result?.[0];
+    if (!result) return null;
+    
+    const ts = result.timestamp ?? [];
+    const quote = result.indicators?.quote?.[0] ?? {};
+    const closes = (quote.close ?? []).filter((v: any) => v != null);
+    const highs = (quote.high ?? []).filter((v: any) => v != null);
+    const lows = (quote.low ?? []).filter((v: any) => v != null);
+    const opens = (quote.open ?? []).filter((v: any) => v != null);
+    const volumes = (quote.volume ?? []).filter((v: any) => v != null);
+    
+    // Közös hosszra igazítás (mert lehet, hogy némelyik rövidebb)
+    const len = Math.min(closes.length, highs.length, lows.length, opens.length, volumes.length);
+    if (len < 100) return null;
+    
+    return {
+      closes: closes.slice(-len),
+      highs: highs.slice(-len),
+      lows: lows.slice(-len),
+      opens: opens.slice(-len),
+      volumes: volumes.slice(-len),
+    };
+  } catch (e) {
+    console.error('Historical data error:', e);
+    return null;
+  }
+}
+
+async function analyzeHistoricalPatterns(
+  ticker: string, 
+  currentCandles: { closes: number[]; highs: number[]; lows: number[]; volumes: number[] }
+): Promise<{
+  fingerprint: Fingerprint | null;
+  stats: any;
+  matches: Array<{
+    startIndex: number;
+    endIndex: number;
+    similarity: number;
+    futureReturn5: number;
+    futureReturn10: number;
+  }>;
+  error?: string;
+}> {
+  try {
+    // 1. Jelenlegi helyzet ujjlenyomata (utolsó 30 gyertya)
+    const currentSize = Math.min(30, currentCandles.closes.length);
+    const currentFp = fingerprint(
+      currentCandles.closes.slice(-currentSize),
+      currentCandles.highs.slice(-currentSize),
+      currentCandles.lows.slice(-currentSize),
+      [],  // opens unknown a fast path-ban
+      currentCandles.volumes.slice(-currentSize)
+    );
+    
+    // 2. 60 napos history lekérése
+    const hist = await fetchHistoricalData(ticker);
+    if (!hist || hist.closes.length < 100) {
+      return { fingerprint: currentFp, stats: null, matches: [], error: 'Nincs elég historikus adat' };
+    }
+    
+    // 3. Sliding window létrehozása (30-as ablak, 5 lépés)
+    // Jelenlegi ablakot kihagyjuk (az utolsó 30 gyertyát)
+    const historyCloses = hist.closes.slice(0, -currentSize);
+    const historyHighs = hist.highs.slice(0, -currentSize);
+    const historyLows = hist.lows.slice(0, -currentSize);
+    const historyOpens = hist.opens.slice(0, -currentSize);
+    const historyVolumes = hist.volumes.slice(0, -currentSize);
+    
+    if (historyCloses.length < 30) {
+      return { fingerprint: currentFp, stats: null, matches: [], error: 'Kevés historikus adat' };
+    }
+    
+    const windows = createWindows(historyCloses, historyHighs, historyLows, historyOpens, historyVolumes, 30, 5);
+    
+    if (windows.length === 0) {
+      return { fingerprint: currentFp, stats: null, matches: [], error: 'Nincs összehasonlítható ablak' };
+    }
+    
+    // 4. Top 10 hasonló keresése
+    const matches = findSimilarPatterns(currentFp, windows, 10);
+    
+    // 5. Statisztika
+    const stats = computePatternStats(matches);
+    
+    return {
+      fingerprint: currentFp,
+      stats,
+      matches: matches.map((m) => ({
+        startIndex: m.window.startIndex,
+        endIndex: m.window.endIndex,
+        similarity: parseFloat(m.similarity.toFixed(3)),
+        futureReturn5: parseFloat((m.futureReturn5 * 100).toFixed(2)),
+        futureReturn10: parseFloat((m.futureReturn10 * 100).toFixed(2)),
+      })),
+    };
+  } catch (e) {
+    console.error('Pattern analysis error:', String(e));
+    return { fingerprint: null, stats: null, matches: [], error: String(e) };
+  }
+}
+
+
+
 serve(async (req) => {
   let body: any = {};
   try {
@@ -398,7 +526,10 @@ serve(async (req) => {
   }
   const weightedScore = bullish - bearish;
 
-  // Jev AI döntés
+  // Historical pattern elemzés (60 nap 15m history)
+  const patternAnalysis = await analyzeHistoricalPatterns(ticker, { closes, highs, lows, volumes });
+
+  // Jev AI döntés (mostantól pattern kontextussal)
   const jev = await jevDecide(bullish, bearish);
 
   const result = {
@@ -411,6 +542,8 @@ serve(async (req) => {
     jev_confidence: jev.confidence,
     jev_reasoning: jev.reasoning,
     atr: parseFloat(atrVal.toFixed(2)),
+    pattern_stats: patternAnalysis.stats,
+    pattern_matches: patternAnalysis.matches,
     analyzed_at: new Date().toISOString(),
   };
 

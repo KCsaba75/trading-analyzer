@@ -26,6 +26,16 @@ const TIMEFRAMES = [
   { value: '1d', label: '1 nap' },
 ];
 
+
+function Stat({ label, value, color = '' }: { label: string; value: string; color?: string }) {
+  return (
+    <div>
+      <div className="text-xs text-[var(--color-muted)]">{label}</div>
+      <div className={`text-lg font-bold ${color}`}>{value}</div>
+    </div>
+  );
+}
+
 export default function AnalysisModule() {
   const [ticker, setTicker] = useState('AAPL');
   const [timeframe, setTimeframe] = useState('15m');
@@ -224,6 +234,56 @@ export default function AnalysisModule() {
               </div>
             </div>
           </Panel>
+
+          {result.pattern_stats && result.pattern_stats.total > 0 && (
+            <Panel title={`🧬 Historical Pattern (60 nap 15m history, top ${result.pattern_stats.total} hasonló ablak)`}>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+                <Stat 
+                  label="🟢 Bullish" 
+                  value={`${result.pattern_stats.bullish} / ${result.pattern_stats.total}`} 
+                  color="text-[var(--color-bull)]" 
+                />
+                <Stat 
+                  label="🔴 Bearish" 
+                  value={`${result.pattern_stats.bearish} / ${result.pattern_stats.total}`} 
+                  color="text-[var(--color-bear)]" 
+                />
+                <Stat 
+                  label="📈 Átlag +5h" 
+                  value={`${result.pattern_stats.avgReturn5 >= 0 ? '+' : ''}${result.pattern_stats.avgReturn5}%`} 
+                  color={result.pattern_stats.avgReturn5 >= 0 ? 'text-[var(--color-bull)]' : 'text-[var(--color-bear)]'} 
+                />
+                <Stat 
+                  label="📈 Átlag +10h" 
+                  value={`${result.pattern_stats.avgReturn10 >= 0 ? '+' : ''}${result.pattern_stats.avgReturn10}%`} 
+                  color={result.pattern_stats.avgReturn10 >= 0 ? 'text-[var(--color-bull)]' : 'text-[var(--color-bear)]'} 
+                />
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-4">
+                <Stat label="⭐ Legjobb eset (+5h)" value={`+${result.pattern_stats.bestCase5}%`} color="text-[var(--color-bull)]" />
+                <Stat label="💀 Legrosszabb eset (+5h)" value={`${result.pattern_stats.worstCase5 >= 0 ? '+' : ''}${result.pattern_stats.worstCase5}%`} color="text-[var(--color-bear)]" />
+                <Stat label="🎯 Legjobb hasonlóság" value={result.pattern_stats.bestMatchSimilarity?.toFixed(2) ?? 'N/A'} />
+              </div>
+              {result.pattern_matches && result.pattern_matches.length > 0 && (
+                <details className="mt-4">
+                  <summary className="cursor-pointer text-sm text-[var(--color-muted)] hover:text-[var(--color-text)]">
+                    🔍 Top 5 hasonló minta (részletek)
+                  </summary>
+                  <div className="mt-3 grid gap-2">
+                    {result.pattern_matches.slice(0, 5).map((m, idx) => (
+                      <div key={idx} className="bg-[var(--color-bg)] p-2 rounded text-xs grid grid-cols-3 gap-2">
+                        <span>Minta #{idx + 1}</span>
+                        <span className="text-[var(--color-accent)]">hasonlóság: {m.similarity.toFixed(3)}</span>
+                        <span className={m.futureReturn5 >= 0 ? 'text-[var(--color-bull)]' : 'text-[var(--color-bear)]'}>
+                          +5h: {m.futureReturn5 >= 0 ? '+' : ''}{m.futureReturn5}% | +10h: {m.futureReturn10 >= 0 ? '+' : ''}{m.futureReturn10}%
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              )}
+            </Panel>
+          )}
 
           <Panel title={`🎯 10 indikátor szavazás (${result.votes.length})`}>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
