@@ -201,8 +201,12 @@ async function jevDecide(bullish: number, bearish: number): Promise<JevResult> {
           questions: {
             decision: {
               type: 'choice',
-              options: ['BUY', 'SELL', 'HOLD'],
-              criteria: ['Long pozíció', 'Short vagy close', 'Várakozás'],
+              instructions: 'A 10 technikai indikátor súlyozott szavazása alapján milyen kereskedelmi döntést hozzunk?',
+              criteria: {
+                BUY: 'Long pozíció nyitása — a súlyozott score bullish és magas a konfidencia',
+                SELL: 'Short pozíció vagy long zárás — a score bearish és egyértelmű a jelzés',
+                HOLD: 'Várakozás jobb belépési pontra — a score semleges vagy alacsony konfidencia',
+              },
             },
           },
         },
@@ -223,10 +227,20 @@ async function jevDecide(bullish: number, bearish: number): Promise<JevResult> {
     } catch {
       parsed = {};
     }
+    
+    // Új Jev formátum: {decision: {choice: "BUY", confidence: 0.25, probabilities: {...}}}
+    // Régi formátum: {answers: {decision: "BUY"}, confidence: 0.6}
+    const decision = parsed?.decision?.choice 
+      ?? parsed?.answers?.decision 
+      ?? 'HOLD';
+    const confidence = parsed?.decision?.confidence 
+      ?? parsed?.confidence 
+      ?? 0.5;
+    
     return {
-      decision: parsed?.answers?.decision ?? 'HOLD',
-      confidence: parsed?.confidence ?? 0.6,
-      reasoning: `Bullish: ${bullish.toFixed(2)}, Bearish: ${bearish.toFixed(2)}`,
+      decision: decision as 'BUY' | 'SELL' | 'HOLD',
+      confidence: typeof confidence === 'number' ? confidence : 0.5,
+      reasoning: `Jev AI: ${decision} (${confidence.toFixed(2)}) — Bullish: ${bullish.toFixed(2)}, Bearish: ${bearish.toFixed(2)}`,
     };
   } catch (e) {
     console.error('Jev error:', String(e));
