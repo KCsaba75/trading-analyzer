@@ -182,7 +182,7 @@ function scoreBasedFallback(score: number): JevResult {
   return { decision: 'HOLD', confidence: 0.5, reasoning: 'Score-alapú fallback (Jev nem elérhető)' };
 }
 
-async function jevDecide(bullish: number, bearish: number, tradeSetup: TradeSetup | null = null): Promise<JevResult> {
+async function jevDecide(bullish: number, bearish: number, tradeSetup: TradeSetup | null = null, patternAnalysis: any = null): Promise<JevResult> {
   const apiKey = Deno.env.get('REQUESTY_API_KEY');
   const score = bullish - bearish;
 
@@ -191,10 +191,35 @@ async function jevDecide(bullish: number, bearish: number, tradeSetup: TradeSetu
     return scoreBasedFallback(score);
   }
 
-  // Trade setup kontextus hozzáadása a prompt-hoz
-  const setupContext = tradeSetup
-    ? `\n\nGemini trade setup ajánlás:\n- Entry: $${tradeSetup.entry}\n- Stop-loss: $${tradeSetup.stop_loss}\n- TP1: $${tradeSetup.take_profit_1}\n- TP2: $${tradeSetup.take_profit_2}\n- Hold time: ${tradeSetup.hold_time}\n- Position size: ${tradeSetup.position_size_pct}%\n- Rationale: ${tradeSetup.rationale}`
-    : '';
+  // Trade setup + pattern kontextus hozzáadása a prompt-hoz
+  let setupContext = '';
+  
+  // Pattern statisztika hozzáadása
+  if (patternAnalysis.stats && patternAnalysis.stats.total > 0) {
+    const ps = patternAnalysis.stats;
+    setupContext += `\n\nHistorical Pattern statisztika (60 nap 15m history, ${ps.total} hasonló ablak):`;
+    setupContext += `\n- Bullish: ${ps.bullish}/${ps.total} (${Math.round(ps.bullish/ps.total*100)}%)`;
+    setupContext += `\n- Bearish: ${ps.bearish}/${ps.total}`;
+    setupContext += `\n- Átlag +5h hozam: ${ps.avgReturn5 >= 0 ? '+' : ''}${ps.avgReturn5}%`;
+    setupContext += `\n- Átlag +10h hozam: ${ps.avgReturn10 >= 0 ? '+' : ''}${ps.avgReturn10}%`;
+    if (ps.bullish / ps.total >= 0.7) {
+      setupContext += `\n- FONTOS: A hasonló szerkezetek TÖBBSÉGÉBEN bullish voltak (≥70%) — erős bullish jel`;
+    } else if (ps.bearish / ps.total >= 0.7) {
+      setupContext += `\n- FONTOS: A hasonló szerkezetek TÖBBSÉGÉBEN bearish voltak (≥70%) — erős bearish jel`;
+    }
+  }
+  
+  // Trade setup hozzáadása
+  if (tradeSetup) {
+    setupContext += `\n\nTrade setup ajánlás:`;
+    setupContext += `\n- Entry: $${tradeSetup.entry}`;
+    setupContext += `\n- Stop-loss: $${tradeSetup.stop_loss}`;
+    setupContext += `\n- TP1: $${tradeSetup.take_profit_1}`;
+    setupContext += `\n- TP2: $${tradeSetup.take_profit_2}`;
+    setupContext += `\n- Hold time: ${tradeSetup.hold_time}`;
+    setupContext += `\n- Position size: ${tradeSetup.position_size_pct}%`;
+    setupContext += `\n- Rationale: ${tradeSetup.rationale}`;
+  }
 
   try {
     const resp = await fetch('https://router.requesty.ai/v1/chat/completions', {
@@ -207,7 +232,30 @@ async function jevDecide(bullish: number, bearish: number, tradeSetup: TradeSetu
         model: 'typesafe/jev-1.13.0',
         messages: [{
           role: 'user',
-          content: `Bullish=${bullish.toFixed(2)}, Bearish=${bearish.toFixed(2)}, Score=${score.toFixed(2)}. Adj döntést.${setupContext}`,
+          content: `Tényleges Bullish score: ${bullish.toFixed(2)}, Bearish score: ${bearish.toFixed(2)}. Korrigált végső Score: ${score.toFixed(3)}. Adj kereskedési döntést.  Figyelembe kell venni a Pattern Statisztikát, ha az erős. ${setupContext}`,
+        }],
+        response_format: {
+          type: 'questions',
+          questions: {
+            decision: {
+              type: 'choice',
+              instructions: 'A 10 technikai indikátor súlyozott szavazása, a korrigált végső score és a historikus pattern statisztika alapján milyen kereskedelmi döntést hozzunk?',
+              criteria: {
+                BUY: 'Long pozíció nyitása — a korrigált score erősen bullish (pl. > 0.3) ÉS a historikus pattern statisztika is megerősíti a bullish irányt (≥70% bullish találat) — magas konfidencia',
+                SELL: 'Short pozíció vagy long zárása — a korrigált score erősen bearish (pl. < -0.3) ÉS a historikus pattern statisztika is megerősíti a bearish irányt (≥70% bearish találat) — magas konfidencia',
+                HOLD: 'Várakozás jobb belépési pontra — a korrigált score semleges vagy a historikus pattern statisztika ellentmondó/semleges — alacsony konfidencia. Vagy ha a score erős, de a pattern nem erősíti meg.',
+              },
+            },
+          },
+        },
+        max_tokens: 200,
+      }),
+    });
+
+    if (!resp.ok) {
+      console.error(`Jev HTTP ${resp.status}: ${await resp.text()}`); // Debug error text
+      return scoreBasedFallback(score);
+    }
         }],
         response_format: {
           type: 'questions',
@@ -385,6 +433,10 @@ async function analyzeHistoricalPatterns(
 
 
 serve(async (req) => {
+  console.log('Analyze-stock function started');
+  console.log('REQUESTY_API_KEY', Deno.env.get('REQUESTY_API_KEY') ? 'set' : 'NOT SET');
+  console.log('SUPABASE_URL', Deno.env.get('SUPABASE_URL') ? 'set' : 'NOT SET');
+  console.log('SUPABASE_SERVICE_ROLE_KEY', Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ? 'set' : 'NOT SET');
   let body: any = {};
   try {
     body = await req.json();
@@ -523,6 +575,9 @@ serve(async (req) => {
     reason: `Volatilitás: ${atrVal.toFixed(2)}`,
   });
 
+  // Historical pattern elemzés ELŐBB (60 nap 15m history)
+  const patternAnalysis = await analyzeHistoricalPatterns(ticker, { closes, highs, lows, volumes });
+
   // Sülyozott score
   let bullish = 0, bearish = 0;
   for (const v of votes) {
@@ -530,10 +585,30 @@ serve(async (req) => {
     if (v.signal === 'bullish') bullish += w;
     if (v.signal === 'bearish') bearish += w;
   }
-  const weightedScore = bullish - bearish;
+  let weightedScore = bullish - bearish;
 
-  // Historical pattern elemzés (60 nap 15m history)
-  const patternAnalysis = await analyzeHistoricalPatterns(ticker, { closes, highs, lows, volumes });
+  // Pattern statisztika korrekció hozzáadása a score-hoz
+  // Ha a pattern statisztika erősen bullish (≥70%), a score-t felfelé toljuk
+  // Ha erősen bearish (≤30%), lefelé toljuk
+  // Súlyozás: max ±0.20 a patternből
+  if (patternAnalysis.stats && patternAnalysis.stats.total > 0) {
+    const ps = patternAnalysis.stats;
+    const bullishRatio = ps.bullish / ps.total;
+    const bearishRatio = ps.bearish / ps.total;
+    
+    if (bullishRatio >= 0.7) {
+      const patternBonus = (bullishRatio - 0.5) * 0.40;
+      weightedScore += patternBonus;
+      console.log(`Pattern bullish korrekció: +${patternBonus.toFixed(3)} (${ps.bullish}/${ps.total})`);
+    } else if (bearishRatio >= 0.7) {
+      const patternBonus = (bearishRatio - 0.5) * 0.40 * -1;
+      weightedScore += patternBonus;
+      console.log(`Pattern bearish korrekció: ${patternBonus.toFixed(3)} (${ps.bearish}/${ps.total})`);
+    }
+    
+    // Score korlátozása -1 ... +1 tartományba
+    weightedScore = Math.max(-1, Math.min(1, weightedScore));
+  }
 
   // Trade setup generálás (Gemini 2.5 Flash a FreeLLMAPI-n, ingyenes)
   // Jev csak a BUY/SELL/HOLD döntést hozza, a trade setup külön LLM
@@ -557,8 +632,8 @@ serve(async (req) => {
     }
   }
 
-  // Jev AI döntés (mostantól trade setup kontextussal)
-  const jev = await jevDecide(bullish, bearish, tradeSetup);
+  // Jev AI döntés (mostantól trade setup + pattern kontextussal)
+  const jev = await jevDecide(bullish, bearish, tradeSetup, patternAnalysis);
 
   const result = {
     ticker,

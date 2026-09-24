@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/trading-monitor",
+      "schedule": "*/15 * * * *"
+    }
+  ]
+}
