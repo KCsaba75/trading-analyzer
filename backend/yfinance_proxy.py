@@ -15,9 +15,10 @@ import pandas as pd
 import numpy as np
 import requests
 import json
+import os
+import sys
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
-import sys
 
 
 # === INDIKÁTOR SZÁMÍTÁSOK ===
@@ -221,9 +222,11 @@ class Handler(BaseHTTPRequestHandler):
         ticker = body.get("ticker", "AAPL").upper()
         tf = body.get("timeframe", "15m")
         yf_interval = tf if tf in ["1m", "5m", "15m", "30m", "60m", "1h"] else "1d"
+        # Növelt időszak a megbízható adatlekéréshez
+        yf_period = "60d" if yf_interval in ["1m", "5m", "15m", "30m"] else "1y"
 
         try:
-            df = yf.download(ticker, period="7d", interval=yf_interval, progress=False)
+            df = yf.download(ticker, period=yf_period, interval=yf_interval, progress=False)
             if df is None or df.empty or len(df) < 30:
                 raise ValueError("Nincs elég adat")
 
