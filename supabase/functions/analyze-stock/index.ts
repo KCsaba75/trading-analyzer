@@ -1,71 +1,47 @@
 // Supabase Edge Function: analyze-stock
 // 2. fázis: 10 indikátor + Jev AI súlyozott szavazás
+// YFinance REST API (nincs külső library dependency)
 // Futtatás: supabase functions deploy analyze-stock
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
-import yahooFinancePkg from 'npm:yahoo-finance2@2.13.0';
-const yahooFinance = new (yahooFinancePkg as any)();
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
-// Indikátor számítások (egyszerűsített verziók)
-const RSI_PERIOD = 14;
-const MACD_FAST = 12, MACD_SLOW = 26, MACD_SIGNAL = 9;
-const BB_PERIOD = 20;
-const STOCH_K = 14, STOCH_D = 3;
-const ADX_PERIOD = 14;
-const ATR_PERIOD = 14;
-const CCI_PERIOD = 20;
-
-interface IndicatorVote {
-  name: string;
-  signal: 'bullish' | 'bearish' | 'neutral';
-  weight: number;
-  confidence: number;
-  value: number | string;
-  reason: string;
-}
+const YF_BASE_URL = 'https://query1.finance.yahoo.com/v8/finance/chart';
 
 // === INDIKÁTOR SZÁMÍTÁSOK ===
 
-function rsi(closes: number[], period = RSI_PERIOD): number {
+function rsi(closes: number[], period = 14): number {
   if (closes.length < period + 1) return 50;
-  const gains: number[] = [], losses: number[] = [];
+  const diffs: number[] = [];
   for (let i = 1; i < closes.length; i++) {
-    const diff = closes[i] - closes[i - 1];
-    gains.push(Math.max(diff, 0));
-    losses.push(Math.max(-diff, 0));
+    diffs.push(closes[i] - closes[i - 1]);
   }
-  const recent = closes.slice(-period - 1);
-  let avgGain = 0, avgLoss = 0;
-  for (let i = 1; i < recent.length; i++) {
-    const diff = recent[i] - recent[i - 1];
-    avgGain += Math.max(diff, 0);
-    avgLoss += Math.max(-diff, 0);
-  }
-  avgGain /= period;
-  avgLoss /= period;
-  if (avgLoss === 0) return 100;
-  const rs = avgGain / avgLoss;
+  const recent = diffs.slice(-period);
+  const gains = recent.filter((d) => d > 0).reduce((a, b) => a + b, 0) / period;
+  const losses = recent.filter((d) => d < 0).reduce((a, b) => a + Math.abs(b), 0) / period;
+  if (losses === 0) return 100;
+  const rs = gains / losses;
   return 100 - 100 / (1 + rs);
 }
 
 function macd(closes: number[]): { macd: number; signal: number; histogram: number } {
+  if (closes.length < 26) return { macd: 0, signal: 0, histogram: 0 };
   const ema = (data: number[], period: number) => {
     const k = 2 / (period + 1);
-    let e = data[0];
-    return data.map((v) => (e = v * k + e * (1 - k)));
+    const result: number[] = [data[0]];
+    for (let i = 1; i < data.length; i++) {
+      result.push(data[i] * k + result[i - 1] * (1 - k));
+    }
+    return result;
   };
-  if (closes.length < MACD_SLOW) return { macd: 0, signal: 0, histogram: 0 };
-  const fastEMA = ema(closes, MACD_FAST);
-  const slowEMA = ema(closes, MACD_SLOW);
+  const fastEMA = ema(closes, 12);
+  const slowEMA = ema(closes, 26);
   const macdLine = fastEMA.map((v, i) => v - slowEMA[i]);
-  const signalLine = ema(macdLine, MACD_SIGNAL);
+  const signalLine = ema(macdLine, 9);
   const i = macdLine.length - 1;
-  const histogram = macdLine[i] - signalLine[i];
-  return { macd: macdLine[i], signal: signalLine[i], histogram };
+  return { macd: macdLine[i], signal: signalLine[i], histogram: macdLine[i] - signalLine[i] };
 }
 
-function bollinger(closes: number[], period = BB_PERIOD) {
+function bollinger(closes: number[], period = 20) {
   if (closes.length < period) return { upper: 0, middle: 0, lower: 0 };
   const recent = closes.slice(-period);
   const mean = recent.reduce((a, b) => a + b, 0) / period;
@@ -75,29 +51,30 @@ function bollinger(closes: number[], period = BB_PERIOD) {
 }
 
 function maCross(closes: number[]): { short: number; long: number; diff: number } {
-  const sma = (data: number[], n: number) => data.slice(-n).reduce((a, b) => a + b, 0) / Math.min(n, data.length);
+  const sma = (data: number[], n: number) =>
+    data.slice(-n).reduce((a, b) => a + b, 0) / Math.min(n, data.length);
   const short = sma(closes, 9);
-  const long = sma(closes, 21);
-  return { short, long, diff: short - long };
+  const long_ = sma(closes, 21);
+  return { short, long: long_, diff: short - long_ };
 }
 
-function stochastic(highs: number[], lows: number[], closes: number[], period = STOCH_K) {
+function stochastic(highs: number[], lows: number[], closes: number[], period = 14) {
   if (closes.length < period) return { k: 50, d: 50 };
   const h = Math.max(...highs.slice(-period));
   const l = Math.min(...lows.slice(-period));
   const c = closes[closes.length - 1];
-  const k = ((c - l) / (h - l)) * 100;
-  return { k, d: k }; // egyszerűsített
+  return { k: h === l ? 50 : ((c - l) / (h - l)) * 100, d: 50 };
 }
 
 function volumeSpike(volumes: number[]): number {
-  if (volumes.length < 20) return 1;
+  if (volumes.length < 21) return 1;
   const recent = volumes[volumes.length - 1];
-  const avg = volumes.slice(-20, -1).reduce((a, b) => a + b, 0) / 19;
+  const avg = volumes.slice(-21, -1).reduce((a, b) => a + b, 0) / 20;
   return avg === 0 ? 1 : recent / avg;
 }
 
-function obv(closes: number[], volumes: number[]): number {
+function obvTrend(closes: number[], volumes: number[]): number {
+  if (closes.length < 2) return 0;
   let obv = 0;
   for (let i = 1; i < closes.length; i++) {
     if (closes[i] > closes[i - 1]) obv += volumes[i];
@@ -106,23 +83,23 @@ function obv(closes: number[], volumes: number[]): number {
   return obv;
 }
 
-function atr(highs: number[], lows: number[], closes: number[], period = ATR_PERIOD): number {
+function atr(highs: number[], lows: number[], closes: number[], period = 14): number {
   const trs: number[] = [];
   for (let i = 1; i < closes.length; i++) {
-    const tr = Math.max(
+    trs.push(Math.max(
       highs[i] - lows[i],
       Math.abs(highs[i] - closes[i - 1]),
       Math.abs(lows[i] - closes[i - 1])
-    );
-    trs.push(tr);
+    ));
   }
+  if (trs.length < period) return 0;
   const recent = trs.slice(-period);
   return recent.reduce((a, b) => a + b, 0) / recent.length;
 }
 
-function cci(highs: number[], lows: number[], closes: number[], period = CCI_PERIOD): number {
+function cci(highs: number[], lows: number[], closes: number[], period = 20): number {
+  if (closes.length < period) return 0;
   const tps = closes.map((c, i) => (highs[i] + lows[i] + c) / 3);
-  if (tps.length < period) return 0;
   const recent = tps.slice(-period);
   const sma = recent.reduce((a, b) => a + b, 0) / period;
   const meanDev = recent.reduce((a, b) => a + Math.abs(b - sma), 0) / period;
@@ -130,28 +107,81 @@ function cci(highs: number[], lows: number[], closes: number[], period = CCI_PER
   return meanDev === 0 ? 0 : (tp - sma) / (0.015 * meanDev);
 }
 
-// ADX egyszerűsített - trend erősség
-function adx(closes: number[]): number {
+function adxSimple(closes: number[]): number {
   if (closes.length < 14) return 20;
-  const diffs = closes.slice(-14).map((v, i, arr) => i > 0 ? Math.abs(v - arr[i - 1]) : 0);
+  const diffs = closes.slice(-14).map((v, i, arr) =>
+    i > 0 ? Math.abs(v - arr[i - 1]) : 0
+  );
   const avg = diffs.reduce((a, b) => a + b, 0) / diffs.length;
   const totalRange = Math.max(...closes.slice(-14)) - Math.min(...closes.slice(-14));
   return totalRange === 0 ? 0 : Math.min(100, (avg / totalRange) * 100 * 5);
 }
 
-// === JEV AI INTEGRÁCIÓ ===
-async function jevDecide(votes: IndicatorVote[]): Promise<{ decision: 'BUY' | 'SELL' | 'HOLD'; confidence: number; reasoning: string }> {
-  const apiKey = Deno.env.get('REQUESTY_API_KEY');
-  if (!apiKey) return { decision: 'HOLD', confidence: 0.5, reasoning: 'Jev API key nincs beállítva' };
+// === YFINANCE ADATLEKÉRÉS (REST API, nincs library) ===
 
-  // Súlyozott score
-  let bullish = 0, bearish = 0;
-  for (const v of votes) {
-    const weight = v.weight * v.confidence;
-    if (v.signal === 'bullish') bullish += weight;
-    if (v.signal === 'bearish') bearish += weight;
+async function fetchYFinanceData(ticker: string, interval: string): Promise<{
+  closes: number[]; highs: number[]; lows: number[]; volumes: number[];
+} | null> {
+  try {
+    const range = ['1m', '5m', '15m', '30m'].includes(interval) ? '60d' : '1y';
+    const url = `${YF_BASE_URL}/${encodeURIComponent(ticker)}?interval=${interval}&range=${range}`;
+    const resp = await fetch(url, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; trading-analyzer/1.0)' }
+    });
+    if (!resp.ok) {
+      console.error(`YFinance HTTP ${resp.status}`);
+      return null;
+    }
+    const data = await resp.json();
+    const result = data?.chart?.result?.[0];
+    if (!result) {
+      console.error('YFinance: nincs result');
+      return null;
+    }
+
+    const closes = result.indicators?.quote?.[0]?.close ?? [];
+    const highs = result.indicators?.quote?.[0]?.high ?? [];
+    const lows = result.indicators?.quote?.[0]?.low ?? [];
+    const volumes = result.indicators?.quote?.[0]?.volume ?? [];
+
+    const clean = { closes: [] as number[], highs: [] as number[], lows: [] as number[], volumes: [] as number[] };
+    for (let i = 0; i < closes.length; i++) {
+      if (closes[i] != null && highs[i] != null && lows[i] != null) {
+        clean.closes.push(closes[i]);
+        clean.highs.push(highs[i]);
+        clean.lows.push(lows[i]);
+        clean.volumes.push(volumes[i] ?? 0);
+      }
+    }
+    return clean.closes.length >= 30 ? clean : null;
+  } catch (e) {
+    console.error('YFinance error:', e);
+    return null;
   }
+}
+
+// === JEV AI INTEGRÁCIÓ ===
+
+interface JevResult {
+  decision: 'BUY' | 'SELL' | 'HOLD';
+  confidence: number;
+  reasoning: string;
+}
+
+function scoreBasedFallback(score: number): JevResult {
+  if (score > 0.3) return { decision: 'BUY', confidence: 0.6, reasoning: 'Score-alapú fallback (Jev nem elérhető)' };
+  if (score < -0.3) return { decision: 'SELL', confidence: 0.6, reasoning: 'Score-alapú fallback (Jev nem elérhető)' };
+  return { decision: 'HOLD', confidence: 0.5, reasoning: 'Score-alapú fallback (Jev nem elérhető)' };
+}
+
+async function jevDecide(bullish: number, bearish: number): Promise<JevResult> {
+  const apiKey = Deno.env.get('REQUESTY_API_KEY');
   const score = bullish - bearish;
+
+  if (!apiKey) {
+    console.warn('REQUESTY_API_KEY nincs beállítva');
+    return scoreBasedFallback(score);
+  }
 
   try {
     const resp = await fetch('https://router.requesty.ai/v1/chat/completions', {
@@ -164,7 +194,7 @@ async function jevDecide(votes: IndicatorVote[]): Promise<{ decision: 'BUY' | 'S
         model: 'typesafe/jev-1.13.0',
         messages: [{
           role: 'user',
-          content: `10 indikátor szavazás eredménye. Bullish súly: ${bullish.toFixed(2)}, Bearish súly: ${bearish.toFixed(2)}, Score: ${score.toFixed(2)} (-1.0 erős bearish, +1.0 erős bullish). Adj döntést és konfidenciát 0-1 között.`,
+          content: `Bullish=${bullish.toFixed(2)}, Bearish=${bearish.toFixed(2)}, Score=${score.toFixed(2)}. Adj döntést.`,
         }],
         response_format: {
           type: 'questions',
@@ -172,219 +202,207 @@ async function jevDecide(votes: IndicatorVote[]): Promise<{ decision: 'BUY' | 'S
             decision: {
               type: 'choice',
               options: ['BUY', 'SELL', 'HOLD'],
-              criteria: ['Long pozíció nyitása', 'Short vagy long zárás', 'Várakozás jobb belépési pontra'],
+              criteria: ['Long pozíció', 'Short vagy close', 'Várakozás'],
             },
           },
         },
-        max_tokens: 200,
+        max_tokens: 100,
       }),
     });
 
     if (!resp.ok) {
-      const text = await resp.text();
-      throw new Error(`Jev API error: ${resp.status} ${text}`);
+      console.error(`Jev HTTP ${resp.status}`);
+      return scoreBasedFallback(score);
     }
 
     const data = await resp.json();
-    // Jev válasz formátum: { answers: { decision: ... }, confidence: ... }
-    const answer = data.choices?.[0]?.message?.content;
-    let parsed;
+    const content = data.choices?.[0]?.message?.content;
+    let parsed: any;
     try {
-      parsed = JSON.parse(answer);
+      parsed = typeof content === 'string' ? JSON.parse(content) : content;
     } catch {
-      parsed = { answers: { decision: 'HOLD' }, confidence: 0.5 };
+      parsed = {};
     }
     return {
-      decision: parsed.answers?.decision ?? 'HOLD',
-      confidence: parsed.confidence ?? 0.5,
+      decision: parsed?.answers?.decision ?? 'HOLD',
+      confidence: parsed?.confidence ?? 0.6,
       reasoning: `Bullish: ${bullish.toFixed(2)}, Bearish: ${bearish.toFixed(2)}`,
     };
   } catch (e) {
-    console.error('Jev hiba:', e);
-    // Fallback: score alapján döntünk
-    if (score > 0.3) return { decision: 'BUY', confidence: 0.6, reasoning: 'Score-alapú fallback döntés (Jev nem elérhető)' };
-    if (score < -0.3) return { decision: 'SELL', confidence: 0.6, reasoning: 'Score-alapú fallback döntés (Jev nem elérhető)' };
-    return { decision: 'HOLD', confidence: 0.5, reasoning: 'Score-alapú fallback (Jev nem elérhető)' };
+    console.error('Jev error:', String(e));
+    return scoreBasedFallback(score);
   }
 }
 
 // === MAIN HANDLER ===
+
 serve(async (req) => {
-  const { ticker = 'AAPL', timeframe = '15m' } = await req.json().catch(() => ({}));
-
+  let body: any = {};
   try {
-    // YFinance adatlekérés
-    const endDate = new Date();
-    const startDate = new Date();
-    startDate.setDate(startDate.getDate() - 7); // 7 nap 15m-es adat
+    body = await req.json();
+  } catch {
+    body = {};
+  }
+  const ticker = (body.ticker || 'AAPL').toUpperCase();
+  const interval = body.timeframe || '1d';
 
-    const data: any[] = await yahooFinance.historical(ticker, {
-      period1: startDate,
-      period2: endDate,
-      interval: timeframe as any,
-    });
+  console.log(`Elemzés indítása: ${ticker} (${interval})`);
 
-    if (!data || data.length < 30) {
-      return new Response(JSON.stringify({ error: 'Nincs elég adat' }), {
-        status: 400,
-        headers: { 'Content-Type': 'application/json' },
-      });
-    }
-
-    const closes = data.map((d) => d.close);
-    const highs = data.map((d) => d.high);
-    const lows = data.map((d) => d.low);
-    const volumes = data.map((d) => d.volume ?? 0);
-    const currentPrice = closes[closes.length - 1];
-
-    // === 10 INDIKÁTOR SZAVAZÁS ===
-    const votes: IndicatorVote[] = [];
-
-    // 1. RSI
-    const rsiVal = rsi(closes);
-    votes.push({
-      name: 'RSI',
-      signal: rsiVal < 30 ? 'bullish' : rsiVal > 70 ? 'bearish' : 'neutral',
-      weight: 0.15,
-      confidence: Math.abs(50 - rsiVal) / 50,
-      value: rsiVal.toFixed(1),
-      reason: rsiVal < 30 ? 'Túladott zóna' : rsiVal > 70 ? 'Túlvett zóna' : 'Semleges zóna',
-    });
-
-    // 2. MACD
-    const macdVal = macd(closes);
-    votes.push({
-      name: 'MACD',
-      signal: macdVal.histogram > 0 ? 'bullish' : 'bearish',
-      weight: 0.15,
-      confidence: Math.min(1, Math.abs(macdVal.histogram) / (currentPrice * 0.01)),
-      value: macdVal.histogram.toFixed(4),
-      reason: macdVal.histogram > 0 ? 'Hisztogram pozitív (momentum felfelé)' : 'Hisztogram negatív (momentum lefelé)',
-    });
-
-    // 3. MA Cross (9/21)
-    const ma = maCross(closes);
-    votes.push({
-      name: 'MA Cross (9/21)',
-      signal: ma.diff > 0 ? 'bullish' : 'bearish',
-      weight: 0.08,
-      confidence: Math.min(1, Math.abs(ma.diff) / (currentPrice * 0.005)),
-      value: ma.diff.toFixed(2),
-      reason: ma.diff > 0 ? 'Rövid távú MA a hosszú felett' : 'Rövid távú MA a hosszú alatt',
-    });
-
-    // 4. Bollinger Bands
-    const bb = bollinger(closes);
-    const bbPos = (currentPrice - bb.lower) / (bb.upper - bb.lower);
-    votes.push({
-      name: 'Bollinger',
-      signal: currentPrice < bb.lower ? 'bullish' : currentPrice > bb.upper ? 'bearish' : 'neutral',
-      weight: 0.08,
-      confidence: Math.max(0, Math.abs(0.5 - bbPos) * 2),
-      value: `${(bbPos * 100).toFixed(0)}%`,
-      reason: currentPrice < bb.lower ? 'Alsó sáv alatt' : currentPrice > bb.upper ? 'Felső sáv felett' : 'Sávok közepén',
-    });
-
-    // 5. Volume spike
-    const vs = volumeSpike(volumes);
-    const trendUp = closes[closes.length - 1] > closes[closes.length - 5];
-    votes.push({
-      name: 'Volume',
-      signal: vs > 1.5 ? (trendUp ? 'bullish' : 'bearish') : 'neutral',
-      weight: 0.1,
-      confidence: Math.min(1, (vs - 1) / 2),
-      value: `${vs.toFixed(2)}x`,
-      reason: vs > 1.5 ? `Átlag ${vs.toFixed(2)}-szörös (${trendUp ? 'rally' : 'dump'})` : 'Normál volumen',
-    });
-
-    // 6. Stochastic
-    const stoch = stochastic(highs, lows, closes);
-    votes.push({
-      name: 'Stochastic',
-      signal: stoch.k < 20 ? 'bullish' : stoch.k > 80 ? 'bearish' : 'neutral',
-      weight: 0.08,
-      confidence: Math.abs(50 - stoch.k) / 50,
-      value: stoch.k.toFixed(1),
-      reason: stoch.k < 20 ? 'Túladott' : stoch.k > 80 ? 'Túlvett' : 'Semleges',
-    });
-
-    // 7. ADX (trend erősség)
-    const adxVal = adx(closes);
-    votes.push({
-      name: 'ADX',
-      signal: adxVal > 25 ? (trendUp ? 'bullish' : 'bearish') : 'neutral',
-      weight: 0.08,
-      confidence: Math.min(1, adxVal / 50),
-      value: adxVal.toFixed(1),
-      reason: adxVal > 25 ? `Erős trend (${adxVal.toFixed(0)})` : 'Gyenge trend',
-    });
-
-    // 8. CCI
-    const cciVal = cci(highs, lows, closes);
-    votes.push({
-      name: 'CCI',
-      signal: cciVal < -100 ? 'bullish' : cciVal > 100 ? 'bearish' : 'neutral',
-      weight: 0.08,
-      confidence: Math.min(1, Math.abs(cciVal) / 200),
-      value: cciVal.toFixed(1),
-      reason: cciVal < -100 ? 'Túladott zóna' : cciVal > 100 ? 'Túlvett zóna' : 'Semleges',
-    });
-
-    // 9. OBV trend
-    const obvVals: number[] = [];
-    for (let i = 20; i <= closes.length; i++) {
-      obvVals.push(obv(closes.slice(0, i), volumes.slice(0, i)));
-    }
-    const obvTrend = obvVals[obvVals.length - 1] - obvVals[obvVals.length - 10];
-    votes.push({
-      name: 'OBV',
-      signal: obvTrend > 0 ? 'bullish' : obvTrend < 0 ? 'bearish' : 'neutral',
-      weight: 0.1,
-      confidence: Math.min(1, Math.abs(obvTrend) / (volumes.reduce((a, b) => a + b, 0) / 10)),
-      value: obvTrend > 0 ? `+${obvTrend}` : `${obvTrend}`,
-      reason: obvTrend > 0 ? 'Pénz beáramlás' : 'Pénz kiáramlás',
-    });
-
-    // 10. ATR (volatilitás - itt inkább neutral)
-    const atrVal = atr(highs, lows, closes);
-    votes.push({
-      name: 'ATR',
-      signal: 'neutral',
-      weight: 0.05,
-      confidence: 0.3,
-      value: atrVal.toFixed(2),
-      reason: `Volatilitás: ${atrVal.toFixed(2)}`,
-    });
-
-    // Sülyozott score
-    let weightedScore = 0;
-    for (const v of votes) {
-      const sign = v.signal === 'bullish' ? 1 : v.signal === 'bearish' ? -1 : 0;
-      weightedScore += sign * v.weight * v.confidence;
-    }
-
-    // Jev AI döntés
-    const jev = await jevDecide(votes);
-
-    const result = {
-      ticker,
-      timeframe,
-      current_price: currentPrice,
-      votes,
-      weighted_score: parseFloat(weightedScore.toFixed(3)),
-      jev_decision: jev.decision,
-      jev_confidence: jev.confidence,
-      jev_reasoning: jev.reasoning,
-      analyzed_at: new Date().toISOString(),
-    };
-
-    return new Response(JSON.stringify(result), {
-      headers: { 'Content-Type': 'application/json' },
-    });
-  } catch (e) {
-    return new Response(JSON.stringify({ error: String(e) }), {
+  // YFinance adatlekérés
+  const data = await fetchYFinanceData(ticker, interval);
+  if (!data) {
+    return new Response(JSON.stringify({ error: 'YFinance: nincs adat vagy hiba' }), {
       status: 500,
       headers: { 'Content-Type': 'application/json' },
     });
   }
+
+  const { closes, highs, lows, volumes } = data;
+  const currentPrice = closes[closes.length - 1];
+
+  // === 10 INDIKÁTOR SZAVAZÁS ===
+  const votes = [];
+
+  // 1. RSI
+  const rsiVal = rsi(closes);
+  votes.push({
+    name: 'RSI',
+    signal: rsiVal < 30 ? 'bullish' : rsiVal > 70 ? 'bearish' : 'neutral',
+    weight: 0.15,
+    confidence: Math.abs(50 - rsiVal) / 50,
+    value: parseFloat(rsiVal.toFixed(1)),
+    reason: rsiVal < 30 ? 'Túladott zóna' : rsiVal > 70 ? 'Túlvett zóna' : 'Semleges zóna',
+  });
+
+  // 2. MACD
+  const macdVal = macd(closes);
+  votes.push({
+    name: 'MACD',
+    signal: macdVal.histogram > 0 ? 'bullish' : 'bearish',
+    weight: 0.15,
+    confidence: Math.min(1, Math.abs(macdVal.histogram) / (currentPrice * 0.01)),
+    value: parseFloat(macdVal.histogram.toFixed(4)),
+    reason: macdVal.histogram > 0 ? 'Hisztogram pozitív' : 'Hisztogram negatív',
+  });
+
+  // 3. MA Cross
+  const ma = maCross(closes);
+  votes.push({
+    name: 'MA Cross (9/21)',
+    signal: ma.diff > 0 ? 'bullish' : 'bearish',
+    weight: 0.08,
+    confidence: Math.min(1, Math.abs(ma.diff) / (currentPrice * 0.005)),
+    value: parseFloat(ma.diff.toFixed(2)),
+    reason: ma.diff > 0 ? 'MA9 a MA21 felett' : 'MA9 a MA21 alatt',
+  });
+
+  // 4. Bollinger
+  const bb = bollinger(closes);
+  const bbPos = bb.upper === bb.lower ? 0.5 : (currentPrice - bb.lower) / (bb.upper - bb.lower);
+  votes.push({
+    name: 'Bollinger',
+    signal: currentPrice < bb.lower ? 'bullish' : currentPrice > bb.upper ? 'bearish' : 'neutral',
+    weight: 0.08,
+    confidence: Math.max(0, Math.abs(0.5 - bbPos) * 2),
+    value: `${(bbPos * 100).toFixed(0)}%`,
+    reason: currentPrice < bb.lower ? 'Alsó sáv alatt' : currentPrice > bb.upper ? 'Felső sáv felett' : 'Sávok közepén',
+  });
+
+  // 5. Volume
+  const vs = volumeSpike(volumes);
+  const trendUp = closes[closes.length - 1] > closes[closes.length - 5];
+  votes.push({
+    name: 'Volume',
+    signal: vs > 1.5 ? (trendUp ? 'bullish' : 'bearish') : 'neutral',
+    weight: 0.1,
+    confidence: Math.min(1, (vs - 1) / 2),
+    value: `${vs.toFixed(2)}x`,
+    reason: vs > 1.5 ? `Volumen ${vs.toFixed(2)}x (${trendUp ? 'rally' : 'dump'})` : 'Normál volumen',
+  });
+
+  // 6. Stochastic
+  const stoch = stochastic(highs, lows, closes);
+  votes.push({
+    name: 'Stochastic',
+    signal: stoch.k < 20 ? 'bullish' : stoch.k > 80 ? 'bearish' : 'neutral',
+    weight: 0.08,
+    confidence: Math.abs(50 - stoch.k) / 50,
+    value: parseFloat(stoch.k.toFixed(1)),
+    reason: stoch.k < 20 ? 'Túladott' : stoch.k > 80 ? 'Túlvett' : 'Semleges',
+  });
+
+  // 7. ADX
+  const adxVal = adxSimple(closes);
+  votes.push({
+    name: 'ADX',
+    signal: adxVal > 25 ? (trendUp ? 'bullish' : 'bearish') : 'neutral',
+    weight: 0.08,
+    confidence: Math.min(1, adxVal / 50),
+    value: parseFloat(adxVal.toFixed(1)),
+    reason: adxVal > 25 ? `Erős trend (${adxVal.toFixed(0)})` : 'Gyenge trend',
+  });
+
+  // 8. CCI
+  const cciVal = cci(highs, lows, closes);
+  votes.push({
+    name: 'CCI',
+    signal: cciVal < -100 ? 'bullish' : cciVal > 100 ? 'bearish' : 'neutral',
+    weight: 0.08,
+    confidence: Math.min(1, Math.abs(cciVal) / 200),
+    value: parseFloat(cciVal.toFixed(1)),
+    reason: cciVal < -100 ? 'Túladott' : cciVal > 100 ? 'Túlvett' : 'Semleges',
+  });
+
+  // 9. OBV
+  const obvVal = obvTrend(closes, volumes);
+  votes.push({
+    name: 'OBV',
+    signal: obvVal > 0 ? 'bullish' : obvVal < 0 ? 'bearish' : 'neutral',
+    weight: 0.1,
+    confidence: 0.5,
+    value: obvVal >= 0 ? `+${Math.abs(obvVal).toLocaleString()}` : `-${Math.abs(obvVal).toLocaleString()}`,
+    reason: obvVal > 0 ? 'Pénz beáramlás' : 'Pénz kiáramlás',
+  });
+
+  // 10. ATR
+  const atrVal = atr(highs, lows, closes);
+  votes.push({
+    name: 'ATR',
+    signal: 'neutral',
+    weight: 0.05,
+    confidence: 0.3,
+    value: parseFloat(atrVal.toFixed(2)),
+    reason: `Volatilitás: ${atrVal.toFixed(2)}`,
+  });
+
+  // Sülyozott score
+  let bullish = 0, bearish = 0;
+  for (const v of votes) {
+    const w = v.weight * v.confidence;
+    if (v.signal === 'bullish') bullish += w;
+    if (v.signal === 'bearish') bearish += w;
+  }
+  const weightedScore = bullish - bearish;
+
+  // Jev AI döntés
+  const jev = await jevDecide(bullish, bearish);
+
+  const result = {
+    ticker,
+    timeframe: interval,
+    current_price: parseFloat(currentPrice.toFixed(2)),
+    votes,
+    weighted_score: parseFloat(weightedScore.toFixed(3)),
+    jev_decision: jev.decision,
+    jev_confidence: jev.confidence,
+    jev_reasoning: jev.reasoning,
+    atr: parseFloat(atrVal.toFixed(2)),
+    analyzed_at: new Date().toISOString(),
+  };
+
+  console.log(`✓ Kész: ${result.ticker} @ ${result.current_price} → ${result.jev_decision} (${result.jev_confidence.toFixed(2)})`);
+
+  return new Response(JSON.stringify(result), {
+    headers: { 'Content-Type': 'application/json' },
+  });
 });
