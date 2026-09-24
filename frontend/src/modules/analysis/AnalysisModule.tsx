@@ -36,36 +36,53 @@ export default function AnalysisModule() {
   const analyze = async () => {
     setLoading(true);
     setError(null);
+
+    // 1. Próbáljuk a HELYI YFinance Proxy-t (localhost:8001)
     try {
-      const supabaseUrl = (import.meta as any).env?.VITE_SUPABASE_URL || 'http://localhost:54321';
-      const supabaseKey = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || '';
-      
-      // Hívjuk az Edge Function-t
-      const resp = await fetch(`${supabaseUrl}/functions/v1/analyze-stock`, {
+      const proxyResp = await fetch('http://localhost:8001/analyze', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${supabaseKey}`,
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ticker, timeframe }),
       });
-      
-      if (!resp.ok) {
-        // Fallback: demo adatokat mutatunk, ha az Edge Function nem elérhető
-        const demoData = generateDemoAnalysis(ticker, timeframe);
-        setResult(demoData);
-        setError(`Edge Function nem elérhető (${resp.status}). Demo adatok jelennek meg. Élesítsd a Supabase Edge Function-t a valós elemzéshez.`);
-      } else {
-        const data = await resp.json();
+      if (proxyResp.ok) {
+        const data = await proxyResp.json();
         setResult(data);
+        setLoading(false);
+        return;
       }
-    } catch (e: any) {
-      const demoData = generateDemoAnalysis(ticker, timeframe);
-      setResult(demoData);
-      setError(`Hálózati hiba: ${e.message}. Demo adatok jelennek meg.`);
-    } finally {
-      setLoading(false);
+    } catch {
+      // Proxy nem fut, megyünk tovább
     }
+
+    // 2. Próbáljuk a Supabase Edge Function-t
+    try {
+      const supabaseUrl = (import.meta as any).env?.VITE_SUPABASE_URL;
+      const supabaseKey = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY;
+      if (supabaseUrl && supabaseKey) {
+        const resp = await fetch(`${supabaseUrl}/functions/v1/analyze-stock`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${supabaseKey}`,
+          },
+          body: JSON.stringify({ ticker, timeframe }),
+        });
+        if (resp.ok) {
+          const data = await resp.json();
+          setResult(data);
+          setLoading(false);
+          return;
+        }
+      }
+    } catch {
+      // Supabase sem elérhető
+    }
+
+    // 3. Demo adatok
+    const demoData = generateDemoAnalysis(ticker, timeframe);
+    setResult(demoData);
+    setError('A YFinance Proxy (localhost:8001) és a Supabase Edge Function sem elérhető. Indítsd el a YFinance Proxy-t vagy aktiváld a Supabase projektet. Demo adatok jelennek meg.');
+    setLoading(false);
   };
 
   // Demo adatok generálása amíg az Edge Function nem elérhető
