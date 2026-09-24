@@ -37,24 +37,7 @@ export default function AnalysisModule() {
     setLoading(true);
     setError(null);
 
-    // 1. Próbáljuk a HELYI YFinance Proxy-t (localhost:8001)
-    try {
-      const proxyResp = await fetch('http://localhost:8001/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ticker, timeframe }),
-      });
-      if (proxyResp.ok) {
-        const data = await proxyResp.json();
-        setResult(data);
-        setLoading(false);
-        return;
-      }
-    } catch {
-      // Proxy nem fut, megyünk tovább
-    }
-
-    // 2. Próbáljuk a Supabase Edge Function-t
+    // 1. Supabase Edge Function (elsődleges — Vercel-en is működik)
     try {
       const supabaseUrl = (import.meta as any).env?.VITE_SUPABASE_URL;
       const supabaseKey = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY;
@@ -70,18 +53,19 @@ export default function AnalysisModule() {
         if (resp.ok) {
           const data = await resp.json();
           setResult(data);
+          setError(null);
           setLoading(false);
           return;
         }
       }
     } catch {
-      // Supabase sem elérhető
+      // Supabase nem elérhető, megyünk tovább
     }
 
-    // 3. Demo adatok
+    // 2. Demo adatok (ha Supabase sem elérhető)
     const demoData = generateDemoAnalysis(ticker, timeframe);
     setResult(demoData);
-    setError('A YFinance Proxy (localhost:8001) és a Supabase Edge Function sem elérhető. Indítsd el a YFinance Proxy-t vagy aktiváld a Supabase projektet. Demo adatok jelennek meg.');
+    setError('A Supabase Edge Function átmenetileg nem elérhető. Demo adatok jelennek meg. (A YFinance proxy csak lokálisan érhető el: localhost:8001)');
     setLoading(false);
   };
 
