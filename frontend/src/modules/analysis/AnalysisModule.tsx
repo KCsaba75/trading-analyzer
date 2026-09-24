@@ -285,6 +285,57 @@ export default function AnalysisModule() {
             </Panel>
           )}
 
+          {result.trade_setup && (
+            <Panel title="🎯 Trade Setup (entry / SL / TP)">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+                <div className="bg-[var(--color-bg)] p-3 rounded-lg">
+                  <div className="text-xs text-[var(--color-muted)]">📍 Belépés</div>
+                  <div className="text-xl font-bold text-[var(--color-accent)]">${result.trade_setup.entry}</div>
+                </div>
+                <div className="bg-[var(--color-bg)] p-3 rounded-lg">
+                  <div className="text-xs text-[var(--color-muted)]">🛑 Stop-Loss</div>
+                  <div className="text-xl font-bold text-[var(--color-bear)]">${result.trade_setup.stop_loss}</div>
+                </div>
+                <div className="bg-[var(--color-bg)] p-3 rounded-lg">
+                  <div className="text-xs text-[var(--color-muted)]">🎯 TP1 (1.5R)</div>
+                  <div className="text-xl font-bold text-[var(--color-bull)]">${result.trade_setup.take_profit_1}</div>
+                </div>
+                <div className="bg-[var(--color-bg)] p-3 rounded-lg">
+                  <div className="text-xs text-[var(--color-muted)]">🎯 TP2 (2.5R)</div>
+                  <div className="text-xl font-bold text-[var(--color-bull)]">${result.trade_setup.take_profit_2}</div>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                <div>
+                  <span className="text-[var(--color-muted)]">⏰ Hold time:</span>{' '}
+                  <span className="font-semibold">{result.trade_setup.hold_time}</span>
+                </div>
+                <div>
+                  <span className="text-[var(--color-muted)]">💰 Position size:</span>{' '}
+                  <span className="font-semibold">{result.trade_setup.position_size_pct}%</span>
+                </div>
+                <div>
+                  <span className="text-[var(--color-muted)]">📊 R:R arány:</span>{' '}
+                  <span className="font-semibold">{result.trade_setup.risk_reward_ratio.toFixed(2)}</span>
+                </div>
+              </div>
+              <div className="mt-4 p-3 bg-[var(--color-bg)] rounded text-sm">
+                <div className="text-[var(--color-muted)] mb-1">📝 Indoklás:</div>
+                <div className="italic">{result.trade_setup.rationale}</div>
+              </div>
+              {result.trade_setup.narrative && (
+                <details className="mt-3">
+                  <summary className="cursor-pointer text-sm text-[var(--color-muted)] hover:text-[var(--color-text)]">
+                    📖 Részletes trade leírás
+                  </summary>
+                  <div className="mt-2 p-3 bg-[var(--color-bg)] rounded text-sm">
+                    {result.trade_setup.narrative}
+                  </div>
+                </details>
+              )}
+            </Panel>
+          )}
+
           <Panel title={`🎯 10 indikátor szavazás (${result.votes.length})`}>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {result.votes.map((vote, idx) => (

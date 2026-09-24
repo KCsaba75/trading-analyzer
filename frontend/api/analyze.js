@@ -1,9 +1,7 @@
 // Vercel API route: /api/analyze
 // Same-origin proxy a Supabase Edge Function-höz
-// Megoldja a CORS / network blokkolási problémákat
 
 export default async function handler(req, res) {
-  // CORS headers - mindig a Vercel domainről jön a kérés, de biztonság kedvéért
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -21,8 +19,7 @@ export default async function handler(req, res) {
 
   if (!supabaseUrl || !supabaseKey) {
     return res.status(500).json({ 
-      error: 'Supabase env vars not set',
-      hint: 'VITE_SUPABASE_URL vagy VITE_SUPABASE_ANON_KEY hiányzik a Vercel env-ből'
+      error: 'Supabase env vars not set' 
     });
   }
 

@@ -50,6 +50,18 @@ export interface PatternMatch {
   futureReturn10: number;
 }
 
+export interface TradeSetup {
+  entry: number;
+  stop_loss: number;
+  take_profit_1: number;
+  take_profit_2: number;
+  hold_time: string;
+  rationale: string;
+  narrative: string;
+  risk_reward_ratio: number;
+  position_size_pct: number;
+}
+
 export interface AnalysisResult {
   id?: string;
   ticker: string;
@@ -63,6 +75,7 @@ export interface AnalysisResult {
   atr?: number;
   pattern_stats?: PatternStats | null;
   pattern_matches?: PatternMatch[];
+  trade_setup?: TradeSetup | null;
   analyzed_at: string;
 }
 

@@ -11,6 +11,7 @@ import {
   computePatternStats,
   type Fingerprint 
 } from './_helpers/pattern.ts';
+import { generateTradeSetup, fallbackTradeSetup, type TradeSetup } from './_helpers/tradeSetup.ts';
 
 const YF_BASE_URL = 'https://query1.finance.yahoo.com/v8/finance/chart';
 
@@ -181,7 +182,7 @@ function scoreBasedFallback(score: number): JevResult {
   return { decision: 'HOLD', confidence: 0.5, reasoning: 'Score-alapú fallback (Jev nem elérhető)' };
 }
 
-async function jevDecide(bullish: number, bearish: number): Promise<JevResult> {
+async function jevDecide(bullish: number, bearish: number, tradeSetup: TradeSetup | null = null): Promise<JevResult> {
   const apiKey = Deno.env.get('REQUESTY_API_KEY');
   const score = bullish - bearish;
 
@@ -189,6 +190,11 @@ async function jevDecide(bullish: number, bearish: number): Promise<JevResult> {
     console.warn('REQUESTY_API_KEY nincs beállítva');
     return scoreBasedFallback(score);
   }
+
+  // Trade setup kontextus hozzáadása a prompt-hoz
+  const setupContext = tradeSetup
+    ? `\n\nGemini trade setup ajánlás:\n- Entry: $${tradeSetup.entry}\n- Stop-loss: $${tradeSetup.stop_loss}\n- TP1: $${tradeSetup.take_profit_1}\n- TP2: $${tradeSetup.take_profit_2}\n- Hold time: ${tradeSetup.hold_time}\n- Position size: ${tradeSetup.position_size_pct}%\n- Rationale: ${tradeSetup.rationale}`
+    : '';
 
   try {
     const resp = await fetch('https://router.requesty.ai/v1/chat/completions', {
@@ -201,7 +207,7 @@ async function jevDecide(bullish: number, bearish: number): Promise<JevResult> {
         model: 'typesafe/jev-1.13.0',
         messages: [{
           role: 'user',
-          content: `Bullish=${bullish.toFixed(2)}, Bearish=${bearish.toFixed(2)}, Score=${score.toFixed(2)}. Adj döntést.`,
+          content: `Bullish=${bullish.toFixed(2)}, Bearish=${bearish.toFixed(2)}, Score=${score.toFixed(2)}. Adj döntést.${setupContext}`,
         }],
         response_format: {
           type: 'questions',
@@ -529,8 +535,30 @@ serve(async (req) => {
   // Historical pattern elemzés (60 nap 15m history)
   const patternAnalysis = await analyzeHistoricalPatterns(ticker, { closes, highs, lows, volumes });
 
-  // Jev AI döntés (mostantól pattern kontextussal)
-  const jev = await jevDecide(bullish, bearish);
+  // Trade setup generálás (Gemini 2.5 Flash a FreeLLMAPI-n, ingyenes)
+  // Jev csak a BUY/SELL/HOLD döntést hozza, a trade setup külön LLM
+  let tradeSetup: TradeSetup | null = null;
+  if (weightedScore > 0.05 || weightedScore < -0.05) {
+    try {
+      tradeSetup = await generateTradeSetup(
+        ticker,
+        weightedScore,
+        votes,
+        patternAnalysis.stats ?? { total: 0, bullish: 0, bearish: 0, neutral: 0, avgReturn5: 0, avgReturn10: 0, bestCase5: 0, bestCase10: 0, worstCase5: 0, bestMatchSimilarity: 0 },
+        parseFloat(currentPrice.toFixed(2)),
+        parseFloat(atrVal.toFixed(2))
+      );
+      if (!tradeSetup) {
+        console.warn('Trade setup null, fallback használata');
+        tradeSetup = fallbackTradeSetup(weightedScore, currentPrice, atrVal, weightedScore > 0 ? 'BUY' : 'SELL');
+      }
+    } catch (e) {
+      console.error('Trade setup hiba:', String(e));
+    }
+  }
+
+  // Jev AI döntés (mostantól trade setup kontextussal)
+  const jev = await jevDecide(bullish, bearish, tradeSetup);
 
   const result = {
     ticker,
@@ -544,6 +572,7 @@ serve(async (req) => {
     atr: parseFloat(atrVal.toFixed(2)),
     pattern_stats: patternAnalysis.stats,
     pattern_matches: patternAnalysis.matches,
+    trade_setup: tradeSetup,
     analyzed_at: new Date().toISOString(),
   };
 
