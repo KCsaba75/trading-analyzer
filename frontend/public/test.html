@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trading Analyzer - 1 Kattintásos Teszt</title>
+<style>
+  body { 
+    font-family: 'Segoe UI', system-ui, sans-serif; 
+    background: #0a0e1a; 
+    color: #e5e7eb; 
+    padding: 20px; 
+    max-width: 1200px; 
+    margin: 0 auto; 
+  }
+  h1 { color: #f59e0b; }
+  h2 { color: #94a3b8; font-size: 14px; text-transform: uppercase; letter-spacing: 1px; margin-top: 30px; }
+  .container { background: #131825; border-radius: 12px; padding: 24px; margin: 16px 0; border: 1px solid #1f2937; }
+  button { 
+    background: #10b981; color: white; border: none; padding: 14px 28px; 
+    font-size: 16px; font-weight: bold; border-radius: 8px; cursor: pointer; 
+    transition: all 0.2s;
+  }
+  button:hover { background: #059669; transform: translateY(-1px); }
+  button:disabled { background: #4b5563; cursor: not-allowed; transform: none; }
+  .test-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; margin: 20px 0; }
+  .test-card { 
+    background: #1a1f35; border-radius: 8px; padding: 16px; 
+    border-left: 4px solid #6b7280; transition: all 0.3s;
+  }
+  .test-card.running { border-left-color: #f59e0b; animation: pulse 1.5s infinite; }
+  .test-card.success { border-left-color: #10b981; }
+  .test-card.failed { border-left-color: #ef4444; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
+  .test-name { font-weight: bold; font-size: 14px; margin-bottom: 8px; }
+  .test-status { font-size: 12px; color: #9ca3af; }
+  .test-result { margin-top: 8px; font-size: 13px; font-family: 'Consolas', monospace; }
+  .metric { display: inline-block; margin: 4px 8px 4px 0; }
+  .metric-label { color: #94a3b8; font-size: 11px; }
+  .metric-value { font-size: 18px; font-weight: bold; }
+  .bull { color: #10b981; }
+  .bear { color: #ef4444; }
+  .neutral { color: #94a3b8; }
+  pre { 
+    background: #0a0e1a; border-radius: 6px; padding: 12px; 
+    overflow-x: auto; font-size: 12px; color: #a5b4fc; 
+    border: 1px solid #1f2937;
+  }
+  .summary { 
+    margin-top: 24px; padding: 16px; border-radius: 8px; 
+    background: #1a1f35; text-align: center; font-size: 18px;
+  }
+</style>
+</head>
+<body>
+  <h1>🧪 Trading Analyzer - 1 Kattintásos Pipeline Teszt</h1>
+  <p>Ez az oldal a teljes elemzési pipeline-t teszteli: YFinance → 10 indikátor → Pattern matching → Jev AI → Trade Setup</p>
+
+  <div class="container">
+    <h2>Konfiguráció</h2>
+    <label>Ticker: 
+      <select id="ticker" style="background: #1a1f35; color: white; padding: 8px; border-radius: 4px; border: 1px solid #374151;">
+        <option>AAPL</option><option>MSFT</option><option>GOOGL</option>
+        <option>TSLA</option><option>NVDA</option><option>AMZN</option>
+        <option>SPY</option><option>QQQ</option><option>META</option>
+      </select>
+    </label>
+    <label style="margin-left: 20px;">Timeframe:
+      <select id="timeframe" style="background: #1a1f35; color: white; padding: 8px; border-radius: 4px; border: 1px solid #374151;">
+        <option value="15m">15m (napi trading)</option>
+        <option value="1h">1h</option>
+        <option value="1d">1d</option>
+      </select>
+    </label>
+    <button id="runBtn" onclick="runPipeline()" style="margin-left: 20px;">▶ Pipeline indítása</button>
+  </div>
+
+  <div class="container">
+    <h2>Pipeline lépések</h2>
+    <div class="test-grid" id="testGrid">
+      <div class="test-card" id="test-1">
+        <div class="test-name">1️⃣ YFinance REST API</div>
+        <div class="test-status">Várakozás...</div>
+      </div>
+      <div class="test-card" id="test-2">
+        <div class="test-name">2️⃣ 10 Inditkátor számítás</div>
+        <div class="test-status">Várakozás...</div>
+      </div>
+      <div class="test-card" id="test-3">
+        <div class="test-name">3️⃣ Pattern Matching (60 nap)</div>
+        <div class="test-status">Várakozás...</div>
+      </div>
+      <div class="test-card" id="test-4">
+        <div class="test-name">4️⃣ Jev AI döntés</div>
+        <div class="test-status">Várakozás...</div>
+      </div>
+      <div class="test-card" id="test-5">
+        <div class="test-name">5️⃣ Trade Setup</div>
+        <div class="test-status">Várakozás...</div>
+      </div>
+      <div class="test-card" id="test-6">
+        <div class="test-name">⏱️ Teljesítmény</div>
+        <div class="test-status">Várakozás...</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="container" id="summaryContainer" style="display:none;">
+    <h2>📊 Végeredmény</h2>
+    <div id="summaryContent"></div>
+    <details style="margin-top: 16px;">
+      <summary style="cursor: pointer; color: #94a3b8;">🔍 Nyers JSON válasz</summary>
+      <pre id="rawJson"></pre>
+    </details>
+  </div>
+
+<script>
+const API_URL = '/api/analyze';
+
+function setStatus(id, status, message) {
+  const card = document.getElementById(id);
+  card.className = 'test-card ' + status;
+  card.querySelector('.test-status').textContent = message;
+}
+
+function setResult(id, html) {
+  const card = document.getElementById(id);
+  if (!card.querySelector('.test-result')) {
+    const div = document.createElement('div');
+    div.className = 'test-result';
+    card.appendChild(div);
+  }
+  card.querySelector('.test-result').innerHTML = html;
+}
+
+async function runPipeline() {
+  const btn = document.getElementById('runBtn');
+  const ticker = document.getElementById('ticker').value;
+  const timeframe = document.getElementById('timeframe').value;
+  btn.disabled = true;
+  btn.textContent = '⏳ Fut...';
+
+  // Reset
+  for (let i = 1; i <= 6; i++) {
+    setStatus('test-' + i, '', 'Várakozás...');
+    const r = document.querySelector('#test-' + i + ' .test-result');
+    if (r) r.remove();
+  }
+  document.getElementById('summaryContainer').style.display = 'none';
+
+  const t0 = performance.now();
+
+  // 1. Pipeline indítása
+  setStatus('test-1', 'running', '🔄 YFinance REST API hívás...');
+
+  try {
+    const resp = await fetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ticker, timeframe }),
+    });
+
+    const tFetch = performance.now();
+
+    if (!resp.ok) {
+      const errText = await resp.text();
+      setStatus('test-1', 'failed', `❌ HTTP ${resp.status}`);
+      setResult('test-1', errText.substring(0, 200));
+      btn.disabled = false;
+      btn.textContent = '▶ Pipeline indítása';
+      return;
+    }
+
+    const data = await resp.json();
+    const tJson = performance.now();
+
+    // 1. YFinance
+    if (data.current_price) {
+      setStatus('test-1', 'success', `✅ ${ticker} @ $${data.current_price}`);
+      setResult('test-1', `<span class="metric"><span class="metric-label">Ár:</span> <span class="metric-value bull">$${data.current_price}</span></span>`);
+    } else {
+      setStatus('test-1', 'failed', '❌ Nincs ár adat');
+    }
+
+    // 2. 10 indikátor
+    if (data.votes && data.votes.length === 10) {
+      const bullish = data.votes.filter(v => v.signal === 'bullish').length;
+      const bearish = data.votes.filter(v => v.signal === 'bearish').length;
+      const neutral = data.votes.filter(v => v.signal === 'neutral').length;
+      setStatus('test-2', 'success', `✅ 10 indikátor kiszámítva`);
+      setResult('test-2', `
+        <span class="metric"><span class="metric-label">🟢 Bull:</span> <span class="metric-value bull">${bullish}</span></span>
+        <span class="metric"><span class="metric-label">🔴 Bear:</span> <span class="metric-value bear">${bearish}</span></span>
+        <span class="metric"><span class="metric-label">⚪ Neutr:</span> <span class="metric-value neutral">${neutral}</span></span>
+        <br><span class="metric-label">Score: </span><span class="metric-value ${data.weighted_score >= 0 ? 'bull' : 'bear'}">${data.weighted_score >= 0 ? '+' : ''}${data.weighted_score.toFixed(3)}</span>
+      `);
+    } else {
+      setStatus('test-2', 'failed', '❌ Indikátorok hiányoznak');
+    }
+
+    // 3. Pattern matching
+    if (data.pattern_stats && data.pattern_stats.total > 0) {
+      const ps = data.pattern_stats;
+      setStatus('test-3', 'success', `✅ ${ps.total} hasonló ablak találva`);
+      setResult('test-3', `
+        <span class="metric"><span class="metric-label">🟢 Bullish:</span> <span class="metric-value bull">${ps.bullish}/${ps.total}</span></span>
+        <span class="metric"><span class="metric-label">🔴 Bearish:</span> <span class="metric-value bear">${ps.bearish}/${ps.total}</span></span>
+        <br><span class="metric-label">📈 +5h átlag:</span> <span class="metric-value ${ps.avgReturn5 >= 0 ? 'bull' : 'bear'}">${ps.avgReturn5 >= 0 ? '+' : ''}${ps.avgReturn5}%</span>
+        <span class="metric"><span class="metric-label">⭐ Legjobb:</span> <span class="metric-value bull">+${ps.bestCase5}%</span></span>
+        <br><span class="metric-label">🎯 Hasonlóság:</span> <span class="metric-value">${ps.bestMatchSimilarity?.toFixed(2) || 'N/A'}</span>
+      `);
+    } else {
+      setStatus('test-3', 'failed', '⚠️ Nincs pattern adat');
+      setResult('test-3', 'A historikus adat túl rövid vagy nem elérhető');
+    }
+
+    // 4. Jev AI
+    if (data.jev_decision) {
+      const cls = data.jev_decision === 'BUY' ? 'bull' : data.jev_decision === 'SELL' ? 'bear' : 'neutral';
+      setStatus('test-4', 'success', `✅ ${data.jev_decision} (${(data.jev_confidence * 100).toFixed(0)}%)`);
+      setResult('test-4', `
+        <span class="metric-label">Döntés:</span> <span class="metric-value ${cls}">${data.jev_decision}</span>
+        <span class="metric-label">Konfidencia:</span> <span class="metric-value">${(data.jev_confidence * 100).toFixed(0)}%</span>
+        <br><span class="metric-label">Indoklás:</span> <span style="font-style: italic;">${(data.jev_reasoning || '').substring(0, 100)}...</span>
+      `);
+    } else {
+      setStatus('test-4', 'failed', '❌ Jev nem válaszolt');
+    }
+
+    // 5. Trade setup
+    if (data.trade_setup) {
+      const ts = data.trade_setup;
+      setStatus('test-5', 'success', '✅ Trade setup kész');
+      setResult('test-5', `
+        <span class="metric"><span class="metric-label">📍 Entry:</span> <span class="metric-value" style="color: #f59e0b;">$${ts.entry}</span></span>
+        <span class="metric"><span class="metric-label">🛑 SL:</span> <span class="metric-value bear">$${ts.stop_loss}</span></span>
+        <br><span class="metric"><span class="metric-label">🎯 TP1:</span> <span class="metric-value bull">$${ts.take_profit_1}</span></span>
+        <span class="metric"><span class="metric-label">🎯 TP2:</span> <span class="metric-value bull">$${ts.take_profit_2}</span></span>
+        <br><span class="metric"><span class="metric-label">⏰ Hold:</span> <span class="metric-value">${ts.hold_time}</span></span>
+        <span class="metric"><span class="metric-label">💰 Size:</span> <span class="metric-value">${ts.position_size_pct}%</span></span>
+        <span class="metric"><span class="metric-label">📊 R:R:</span> <span class="metric-value">${ts.risk_reward_ratio?.toFixed(2) || 'N/A'}</span></span>
+      `);
+    } else {
+      setStatus('test-5', 'failed', '⚠️ Trade setup nincs (HOLD)');
+    }
+
+    // 6. Performance
+    const totalTime = ((tJson - t0) / 1000).toFixed(2);
+    const fetchTime = ((tFetch - t0) / 1000).toFixed(2);
+    const parseTime = ((tJson - tFetch) / 1000).toFixed(2);
+    setStatus('test-6', 'success', `✅ ${totalTime}s`);
+    setResult('test-6', `
+      <span class="metric"><span class="metric-label">Fetch:</span> <span class="metric-value">${fetchTime}s</span></span>
+      <span class="metric"><span class="metric-label">Parse:</span> <span class="metric-value">${parseTime}s</span></span>
+      <span class="metric"><span class="metric-label">Összesen:</span> <span class="metric-value" style="color: #f59e0b;">${totalTime}s</span></span>
+    `);
+
+    // Summary
+    document.getElementById('summaryContainer').style.display = 'block';
+    const verdict = data.jev_decision === 'BUY' ? '🟢 VÉTEL' : data.jev_decision === 'SELL' ? '🔴 ELADÁS' : '⚪ VÁRAKOZÁS';
+    const verdictClass = data.jev_decision === 'BUY' ? 'bull' : data.jev_decision === 'SELL' ? 'bear' : 'neutral';
+    
+    let summaryHTML = `
+      <div style="text-align: center; margin-bottom: 20px;">
+        <div style="font-size: 14px; color: #94a3b8;">${ticker} @ ${timeframe}</div>
+        <div style="font-size: 48px; font-weight: bold;" class="${verdictClass}">${verdict}</div>
+        <div style="font-size: 14px; color: #94a3b8;">Jev konfidencia: ${(data.jev_confidence * 100).toFixed(0)}%</div>
+      </div>
+    `;
+
+    if (data.trade_setup) {
+      const ts = data.trade_setup;
+      summaryHTML += `
+        <div style="background: #0a0e1a; border-radius: 8px; padding: 20px;">
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 16px; text-align: center;">
+            <div>
+              <div style="font-size: 11px; color: #94a3b8;">📍 BELÉPÉS</div>
+              <div style="font-size: 24px; font-weight: bold; color: #f59e0b;">$${ts.entry}</div>
+            </div>
+            <div>
+              <div style="font-size: 11px; color: #94a3b8;">🛑 STOP-LOSS</div>
+              <div style="font-size: 24px; font-weight: bold;" class="bear">$${ts.stop_loss}</div>
+            </div>
+            <div>
+              <div style="font-size: 11px; color: #94a3b8;">🎯 TP1 (1.5R)</div>
+              <div style="font-size: 24px; font-weight: bold;" class="bull">$${ts.take_profit_1}</div>
+            </div>
+            <div>
+              <div style="font-size: 11px; color: #94a3b8;">🎯 TP2 (2.5R)</div>
+              <div style="font-size: 24px; font-weight: bold;" class="bull">$${ts.take_profit_2}</div>
+            </div>
+          </div>
+          <div style="margin-top: 16px; text-align: center; color: #94a3b8; font-size: 13px;">
+            ⏰ Hold time: ${ts.hold_time} | 💰 Size: ${ts.position_size_pct}% | 📊 R:R: ${ts.risk_reward_ratio?.toFixed(2) || 'N/A'}
+          </div>
+        </div>
+      `;
+    }
+
+    if (data.pattern_stats && data.pattern_stats.total > 0) {
+      const ps = data.pattern_stats;
+      summaryHTML += `
+        <div style="margin-top: 16px; padding: 16px; background: #0a0e1a; border-radius: 8px; font-size: 13px;">
+          <div style="color: #94a3b8; margin-bottom: 8px;">🧬 HISTORICAL PATTERN (60 nap 15m history)</div>
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px;">
+            <div>🟢 Bullish: <span class="bull">${ps.bullish}/${ps.total}</span> (${Math.round(ps.bullish/ps.total*100)}%)</div>
+            <div>🔴 Bearish: <span class="bear">${ps.bearish}/${ps.total}</span></div>
+            <div>📈 Átlag +5h: <span class="${ps.avgReturn5 >= 0 ? 'bull' : 'bear'}">${ps.avgReturn5 >= 0 ? '+' : ''}${ps.avgReturn5}%</span></div>
+            <div>⭐ Legjobb eset: <span class="bull">+${ps.bestCase5}%</span></div>
+          </div>
+        </div>
+      `;
+    }
+
+    document.getElementById('summaryContent').innerHTML = summaryHTML;
+    document.getElementById('rawJson').textContent = JSON.stringify(data, null, 2);
+
+  } catch (e) {
+    setStatus('test-1', 'failed', '❌ Hálózati hiba');
+    setResult('test-1', e.message);
+  }
+
+  btn.disabled = false;
+  btn.textContent = '▶ Pipeline indítása';
+}
+
+// Auto-run on load (opcionális - kommenteld ki ha nem akarod)
+// window.onload = () => setTimeout(runPipeline, 500);
+</script>
+</body>
+</html>
