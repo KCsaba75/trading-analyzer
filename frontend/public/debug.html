@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+<meta charset="UTF-8">
+<title>Supabase Edge Function Debug</title>
+<style>
+body { background: #0a0e1a; color: #e2e8f0; font-family: monospace; padding: 20px; }
+.ok { color: #22c55e; }
+.err { color: #ef4444; }
+pre { background: #131826; padding: 16px; border-radius: 8px; overflow: auto; }
+button { background: #10b981; color: black; padding: 12px 24px; border: none; border-radius: 8px; cursor: pointer; }
+</style>
+</head>
+<body>
+<h1>🔍 Supabase Edge Function Debug</h1>
+<p>URL: <code>https://azjsjcgvbexxfqlrajrt.supabase.co/functions/v1/analyze-stock</code></p>
+<button onclick="test()">▶ Teszt indítása</button>
+<pre id="log">Klikk a "Teszt indítása" gombra...</pre>
+
+<script>
+const url = "https://azjsjcgvbexxfqlrajrt.supabase.co/functions/v1/analyze-stock";
+const anonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF6anNqY2d2YmV4eGZxbHJhanJ0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTAyMzU5OTYsImV4cCI6MjEwNTgxMTk5Nn0.-mH7XC0ZEJPb2XZCXI5VrANGZ0xL2SHUB3OmCQtx1PM";  // a .env.local-ból
+
+async function test() {
+  const log = document.getElementById("log");
+  log.innerHTML = "Indítás...\n\n";
+  
+  log.innerHTML += "POST " + url + "\n";
+  log.innerHTML += "Authorization: Bearer eyJhbG...x1PM\n\n";
+  
+  try {
+    const start = Date.now();
+    const resp = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer " + anonKey
+      },
+      body: JSON.stringify({ ticker: "AAPL", timeframe: "1d" })
+    });
+    const elapsed = Date.now() - start;
+    
+    log.innerHTML += `Státusz: ${resp.statusCode} (${elapsed}ms)\n\n`;
+    
+    if (resp.ok) {
+      const data = await resp.json();
+      log.innerHTML += '<span class="ok">✓ SIKERES</span>\n\n';
+      log.innerHTML += `Ticker: ${data.ticker}\n`;
+      log.innerHTML += `Ár: $${data.current_price}\n`;
+      log.innerHTML += `Jev: ${data.jev_decision} (${Math.round(data.jev_confidence * 100)}%)\n`;
+      log.innerHTML += `Indikátorok: ${data.votes.length} db\n`;
+    } else {
+      const txt = await resp.text();
+      log.innerHTML += '<span class="err">✗ HIBA: ' + txt + '</span>\n';
+    }
+  } catch (e) {
+    log.innerHTML += '<span class="err">✗ KIVÉTEL: ' + e.message + '\n\n';
+    log.innerHTML += "Lehetséges ok:\n";
+    log.innerHTML += "- Hálózati hiba\n";
+    log.innerHTML += "- CORS blokk\n";
+    log.innerHTML += "- VPN / tűzfal blokkolja\n";
+  }
+}
+</script>
+</body>
+</html>
