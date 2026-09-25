@@ -81,22 +81,19 @@ export default function AnalysisModule() {
     loadStrategies();
   }, []);
 
-  // Egy ticker 15m elemzése
+  // Egy ticker 15m elemzése - same-origin proxy-n keresztül (nincs CORS!)
   const analyzeTicker = async (ticker: string, timeframe: string): Promise<AnalysisResult | null> => {
     try {
-      const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || 'https://azjsjcgvbexxfqlrajrt.supabase.co';
-      const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
-
-      const resp = await fetch(`${SUPABASE_URL}/functions/v1/analyze-stock`, {
+      const resp = await fetch('/api/analyze', {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ticker, timeframe }),
       });
 
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      if (!resp.ok) {
+        console.error(`Analyze ${ticker} failed: HTTP ${resp.status}`);
+        return null;
+      }
       return await resp.json();
     } catch (e: any) {
       console.error(`Analysis failed for ${ticker}:`, e);
