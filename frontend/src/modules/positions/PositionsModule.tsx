@@ -45,6 +45,11 @@ function safeFixed(value: any, digits: number = 2): string {
   return Number(value).toFixed(digits);
 }
 
+// Pending pozíció kora (percben)
+function pendingAge(createdAt: string): number {
+  return (Date.now() - new Date(createdAt).getTime()) / 60000;
+}
+
 function statusBadge(status: string) {
   switch (status) {
     case 'pending':
@@ -194,6 +199,87 @@ export default function PositionsModule() {
     }
   };
 
+  // Pending pozíció frissítése — újraelemzi a tickert a legfrissebb árakkal
+  const handleRefresh = async (positionId: string, ticker: string) => {
+    setActionLoading(positionId);
+    setError(null);
+    try {
+      const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || 'https://azjsjcgvbexxfqlrajrt.supabase.co';
+      const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+
+      const resp = await fetch(`${SUPABASE_URL}/functions/v1/analyze-stock`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ ticker, timeframe: '15m' }),
+      });
+
+      if (!resp.ok) throw new Error(`Elemzés sikertelen: ${resp.status}`);
+
+      const data = await resp.json();
+      const newPrice = data.current_price;
+      const decision = data.jev_decision;
+      const confidence = data.jev_confidence;
+      const tradeSetup = data.trade_setup || {};
+
+      // Ellenőrizzük, hogy a döntés még mindig BUY/SELL
+      if (decision !== 'BUY' && decision !== 'SELL') {
+        await positionsApi.delete(positionId);
+        alert(`${ticker}: Már nem BUY/SELL (${decision}) — a pozíció törölve.`);
+        await loadData();
+        return;
+      }
+
+      // Ellenőrizzük, hogy a piac nem mozdult-e el túl sokat (>0.5%)
+      const oldPos = positions.find(p => p.id === positionId);
+      const oldPrice = oldPos?.entry_price || 0;
+      const priceChange = Math.abs(newPrice - oldPrice) / oldPrice;
+
+      if (priceChange > 0.005) {
+        // 0.5%-nál nagyobb változás → töröljük
+        await positionsApi.delete(positionId);
+        const dir = priceChange * 100;
+        alert(`${ticker}: A piac ${dir.toFixed(2)}%-ot mozdult — a pozíció törölve (nem érdemes megnyitni).`);
+        await loadData();
+        return;
+      }
+
+      // Frissítjük az entry/SL/TP árakat + created_at (új 14.5 perc!)
+      const sl = tradeSetup.stop_loss || oldPos?.stop_loss;
+      const tp1 = tradeSetup.take_profit_1 || oldPos?.take_profit_1;
+      const tp2 = tradeSetup.take_profit_2 || oldPos?.take_profit_2;
+      const tp3 = tradeSetup.take_profit_3 || oldPos?.take_profit_3;
+      const newEntry = tradeSetup.entry || newPrice;
+
+      const { supabase } = await import('../../lib/supabase/client');
+      const { error: updateError } = await supabase
+        .from('positions')
+        .update({
+          entry_price: newEntry,
+          stop_loss: sl,
+          take_profit_1: tp1,
+          take_profit_2: tp2,
+          take_profit_3: tp3,
+          confidence: confidence,
+          decision: decision,
+          reasoning: `Frissítve: ${decision} @ ${newPrice.toFixed(2)} (${(priceChange * 100).toFixed(2)}% változás)`,
+          created_at: new Date().toISOString(),
+        })
+        .eq('id', positionId);
+
+      if (updateError) throw updateError;
+
+      await loadData();
+      alert(`✅ ${ticker} pozíció frissítve! Új entry: $${newEntry.toFixed(2)}`);
+    } catch (e: any) {
+      setError(`Frissítési hiba: ${e.message}`);
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
   // Összes P&L
   const totalPnl = closedPositions.reduce((sum, p) => sum + (p.pnl || 0), 0);
   const wins = closedPositions.filter(p => (p.pnl || 0) > 0).length;
@@ -282,7 +368,13 @@ export default function PositionsModule() {
         <Panel title={`Várakozó ajánlások (${pendingPositions.length})`}>
           <div className="space-y-3">
             {pendingPositions.map(p => (
-              <div key={p.id} className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-lg p-4">
+              <div key={p.id} className={`bg-[var(--color-bg)] border rounded-lg p-4 ${
+                pendingAge(p.created_at) >= 10
+                  ? 'border-orange-500/50'
+                  : pendingAge(p.created_at) >= 5
+                  ? 'border-yellow-500/50'
+                  : 'border-[var(--color-border)]'
+              }`}>
                 <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-3">
                     <span className="font-bold text-lg">{p.ticker}</span>
@@ -291,6 +383,15 @@ export default function PositionsModule() {
                     <span className="text-xs text-[var(--color-muted)]">
                       {p.timeframe} • konfidencia: {(p.confidence * 100).toFixed(0)}%
                     </span>
+                    {pendingAge(p.created_at) >= 5 && (
+                      <span className={`text-xs px-2 py-0.5 rounded ${
+                        pendingAge(p.created_at) >= 10
+                          ? 'bg-orange-500/20 text-orange-400'
+                          : 'bg-yellow-500/20 text-yellow-400'
+                      }`}>
+                        ⏱️ {pendingAge(p.created_at).toFixed(0)} perc • {pendingAge(p.created_at) >= 10 ? 'Auto-frissítés!' : 'Frissítsd!'}
+                      </span>
+                    )}
                   </div>
                   <span className="text-xs text-[var(--color-muted)]">
                     {new Date(p.created_at).toLocaleString('hu-HU')}
@@ -331,6 +432,16 @@ export default function PositionsModule() {
                     <CheckCircle2 size={14} className="mr-1" />
                     Pozíció megnyitása (manuálisan a brókerben!)
                   </Button>
+                  {pendingAge(p.created_at) >= 5 && (
+                    <Button
+                      onClick={() => handleRefresh(p.id, p.ticker)}
+                      disabled={actionLoading === p.id}
+                      variant="ghost"
+                    >
+                      <RefreshCw size={14} className="mr-1" />
+                      Elemzés frissítése
+                    </Button>
+                  )}
                   <Button
                     onClick={() => handleDelete(p.id)}
                     disabled={actionLoading === p.id}

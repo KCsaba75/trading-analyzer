@@ -297,6 +297,121 @@ function isMarketOpen(): { open: boolean; reason: string; nextOpen?: string } {
   return { open: false, reason: 'Piac zárva (UTC idő: ' + now.toISOString() + ')' };
 }
 
+// Pending pozíciók auto-cleanup és auto-frissítés
+async function cleanupAndRefreshPendingPositions(strategy: ActiveStrategy): Promise<void> {
+  const PRICE_CHANGE_THRESHOLD = 0.005; // 0.5%
+  const STALE_MINUTES = 10;             // 10 perc után auto-frissítés
+  const EXPIRY_MINUTES = 14.5;          // 14.5 perc után törlés
+
+  try {
+    // 1. 14.5+ perces pending pozíciók törlése
+    const expiryCutoff = new Date(Date.now() - EXPIRY_MINUTES * 60 * 1000).toISOString();
+    const deleteResp = await fetch(
+      SUPABASE_URL + '/rest/v1/positions?status=eq.pending&created_at=lt.' + encodeURIComponent(expiryCutoff),
+      {
+        method: 'DELETE',
+        headers: {
+          'Authorization': 'Bearer ' + SUPABASE_SERVICE_ROLE_KEY,
+          'apikey': SUPABASE_SERVICE_ROLE_KEY
+        }
+      }
+    );
+    if (deleteResp.ok) {
+      console.log('Deleted pending positions older than ' + EXPIRY_MINUTES + ' minutes');
+    }
+
+    // 2. 10+ perces pending pozíciók frissítése vagy törlése
+    const staleCutoff = new Date(Date.now() - STALE_MINUTES * 60 * 1000).toISOString();
+    const staleResp = await fetch(
+      SUPABASE_URL + '/rest/v1/positions?status=eq.pending&created_at=lt.' + encodeURIComponent(staleCutoff) + '&order=created_at.asc',
+      {
+        headers: {
+          'Authorization': 'Bearer ' + SUPABASE_SERVICE_ROLE_KEY,
+          'apikey': SUPABASE_SERVICE_ROLE_KEY
+        }
+      }
+    );
+    if (!staleResp.ok) return;
+    const stalePositions = await staleResp.json();
+
+    for (const pos of stalePositions) {
+      try {
+        // Frissítjük az elemzést
+        const analysis = await analyze(pos.ticker, pos.timeframe);
+        if (!analysis) continue;
+
+        const newPrice = analysis.current_price;
+        const oldPrice = Number(pos.entry_price);
+        const priceChange = Math.abs(newPrice - oldPrice) / oldPrice;
+
+        // Ha a döntés már nem BUY/SELL, töröljük
+        if (analysis.jev_decision !== 'BUY' && analysis.jev_decision !== 'SELL') {
+          await fetch(SUPABASE_URL + '/rest/v1/positions?id=eq.' + pos.id, {
+            method: 'DELETE',
+            headers: {
+              'Authorization': 'Bearer ' + SUPABASE_SERVICE_ROLE_KEY,
+              'apikey': SUPABASE_SERVICE_ROLE_KEY
+            }
+          });
+          console.log('Deleted ' + pos.ticker + ' - no longer BUY/SELL (' + analysis.jev_decision + ')');
+          continue;
+        }
+
+        // Ha a piac túl sokat mozdult (>0.5%), töröljük
+        if (priceChange > PRICE_CHANGE_THRESHOLD) {
+          await fetch(SUPABASE_URL + '/rest/v1/positions?id=eq.' + pos.id, {
+            method: 'DELETE',
+            headers: {
+              'Authorization': 'Bearer ' + SUPABASE_SERVICE_ROLE_KEY,
+              'apikey': SUPABASE_SERVICE_ROLE_KEY
+            }
+          });
+          console.log('Deleted ' + pos.ticker + ' - price moved ' + (priceChange * 100).toFixed(2) + '%');
+          continue;
+        }
+
+        // Egyébként frissítjük az entry/SL/TP-t + created_at (új 14.5 perc!)
+        const ts = analysis.trade_setup || {};
+        const newEntry = ts.entry || newPrice;
+        const newSl = ts.stop_loss || (analysis.jev_decision === 'BUY'
+          ? newPrice * (1 - strategy.stop_loss_pct / 100)
+          : newPrice * (1 + strategy.stop_loss_pct / 100));
+        const newTp1 = ts.take_profit_1 || (analysis.jev_decision === 'BUY'
+          ? newPrice * (1 + strategy.take_profit_pct * 0.5 / 100)
+          : newPrice * (1 - strategy.take_profit_pct * 0.5 / 100));
+        const newTp2 = ts.take_profit_2 || (analysis.jev_decision === 'BUY'
+          ? newPrice * (1 + strategy.take_profit_pct / 100)
+          : newPrice * (1 - strategy.take_profit_pct / 100));
+
+        await fetch(SUPABASE_URL + '/rest/v1/positions?id=eq.' + pos.id, {
+          method: 'PATCH',
+          headers: {
+            'Authorization': 'Bearer ' + SUPABASE_SERVICE_ROLE_KEY,
+            'apikey': SUPABASE_SERVICE_ROLE_KEY,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            entry_price: newEntry,
+            stop_loss: newSl,
+            take_profit_1: newTp1,
+            take_profit_2: newTp2,
+            take_profit_3: newTp2 * (1 + (newTp2 - newEntry) / newEntry),
+            decision: analysis.jev_decision,
+            confidence: analysis.jev_confidence,
+            reasoning: 'Auto-frissítve (' + (priceChange * 100).toFixed(2) + '% változás)',
+            created_at: new Date().toISOString()
+          })
+        });
+        console.log('Refreshed ' + pos.ticker + ' - price moved ' + (priceChange * 100).toFixed(2) + '%');
+      } catch (e: any) {
+        console.error('Error refreshing ' + pos.ticker + ': ' + e.message);
+      }
+    }
+  } catch (e: any) {
+    console.error('Error in cleanupAndRefreshPendingPositions: ' + e.message);
+  }
+}
+
 serve(async (req) => {
   console.log('Trading monitor started');
 
@@ -321,6 +436,9 @@ serve(async (req) => {
     console.log('No active strategy found, skipping analysis');
     return new Response(JSON.stringify({ error: 'No active strategy' }), { headers: { 'Content-Type': 'application/json' } });
   }
+
+  // Pending pozíciók auto-cleanup és auto-frissítés
+  await cleanupAndRefreshPendingPositions(strategy);
   
   const openPositions = await getOpenPositions();
   const dailyTradeCount = await getDailyTradeCount();
