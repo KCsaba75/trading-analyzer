@@ -256,24 +256,6 @@ async function jevDecide(bullish: number, bearish: number, tradeSetup: TradeSetu
       console.error(`Jev HTTP ${resp.status}: ${await resp.text()}`); // Debug error text
       return scoreBasedFallback(score);
     }
-        }],
-        response_format: {
-          type: 'questions',
-          questions: {
-            decision: {
-              type: 'choice',
-              instructions: 'A 10 technikai indikátor súlyozott szavazása alapján milyen kereskedelmi döntést hozzunk?',
-              criteria: {
-                BUY: 'Long pozíció nyitása — a súlyozott score bullish és magas a konfidencia',
-                SELL: 'Short pozíció vagy long zárás — a score bearish és egyértelmű a jelzés',
-                HOLD: 'Várakozás jobb belépési pontra — a score semleges vagy alacsony konfidencia',
-              },
-            },
-          },
-        },
-        max_tokens: 100,
-      }),
-    });
 
     if (!resp.ok) {
       console.error(`Jev HTTP ${resp.status}`);
@@ -432,7 +414,28 @@ async function analyzeHistoricalPatterns(
 
 
 
-serve(async (req) => {
+
+  // CORS preflight handler
+  serve(async (req) => {
+  // CORS preflight
+  if (req.method === 'OPTIONS') {
+    return new Response(null, {
+      status: 204,
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
+        'Access-Control-Allow-Headers': 'authorization, content-type, x-client-info, apikey',
+        'Access-Control-Max-Age': '86400',
+      },
+    });
+  }
+
+  // CORS helper a válaszokhoz
+  const corsResp = (body: any, status = 200) => new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json' },
+  });
+
   console.log('Analyze-stock function started');
   console.log('REQUESTY_API_KEY', Deno.env.get('REQUESTY_API_KEY') ? 'set' : 'NOT SET');
   console.log('SUPABASE_URL', Deno.env.get('SUPABASE_URL') ? 'set' : 'NOT SET');
@@ -451,10 +454,7 @@ serve(async (req) => {
   // YFinance adatlekérés
   const data = await fetchYFinanceData(ticker, interval);
   if (!data) {
-    return new Response(JSON.stringify({ error: 'YFinance: nincs adat vagy hiba' }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    return corsResp({ error: 'YFinance: nincs adat vagy hiba' }, 500);
   }
 
   const { closes, highs, lows, volumes } = data;
@@ -653,7 +653,5 @@ serve(async (req) => {
 
   console.log(`✓ Kész: ${result.ticker} @ ${result.current_price} → ${result.jev_decision} (${result.jev_confidence.toFixed(2)})`);
 
-  return new Response(JSON.stringify(result), {
-    headers: { 'Content-Type': 'application/json' },
-  });
+  return corsResp(result);
 });
