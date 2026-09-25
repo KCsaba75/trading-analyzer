@@ -87,11 +87,8 @@ export default function PositionsModule() {
       if (strategiesError) throw strategiesError;
       setStrategies(strategiesData ?? []);
 
-      // Auto-select első aktív stratégia
-      const active = (strategiesData ?? []).find((s: Strategy) => s.is_active);
-      if (active && !selectedStrategyId) {
-        setSelectedStrategyId(active.id);
-      }
+      // Auto-select KI - alapértelmezetten MINDEN pozíciót mutatunk
+      // (a user később választhat konkrét stratégiát, ha akar)
 
       // Pozíciók betöltése
       const positionsData = await positionsApi.list();
@@ -108,6 +105,8 @@ export default function PositionsModule() {
   }, []);
 
   // Szűrt pozíciók a kiválasztott stratégia alapján
+  // Ha NINCS kiválasztott stratégia (üres string), MINDEN pozíciót mutatunk
+  // Ha VAN kiválasztott stratégia, csak az adott stratégia pozícióit mutatjuk
   const filteredPositions = positions.filter(p => !selectedStrategyId || p.strategy_id === selectedStrategyId);
 
   // Várakozó (pending) pozíciók — ezek az aktiválandó ajánlások
