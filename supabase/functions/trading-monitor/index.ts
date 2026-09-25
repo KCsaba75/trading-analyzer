@@ -239,9 +239,82 @@ async function updateLastAlert(id: string) {
   }
 }
 
+// US piaci nyitvatartás ellenőrzése (NYSE/NASDAQ)
+// UTC idő alapján:
+// - Pre-market: hétköznap 13:30 - 14:30 UTC
+// - Regular hours: hétköznap 14:30 - 21:00 UTC
+// - After hours: hétköznap 21:00 - 00:00 UTC
+// - Zárva: hétköznap 00:00 - 13:30 UTC + hétvégén
+function isMarketOpen(): { open: boolean; reason: string; nextOpen?: string } {
+  const now = new Date();
+  const hourUTC = now.getUTCHours();
+  const minuteUTC = now.getUTCMinutes();
+  const dayUTC = now.getUTCDay(); // 0 = vasárnap, 6 = szombat, 1-5 = hétköznap
+  const timeInMinutes = hourUTC * 60 + minuteUTC;
+  const marketOpenMin = 13 * 60 + 30; // 13:30 UTC
+  const marketCloseMin = 21 * 60;      // 21:00 UTC
+
+  // Hétvége: szombat (6) egész nap, vasárnap (0) egész nap
+  if (dayUTC === 6) {
+    return { open: false, reason: 'Hétvége (szombat) - piac zárva' };
+  }
+  if (dayUTC === 0 && timeInMinutes < 23 * 60) {
+    return { open: false, reason: 'Vasárnap délelőtt - piac zárva' };
+  }
+
+  // Hétköznap (1-5) vagy péntek este
+  // Először ellenőrizzük a péntek zárást
+  if (dayUTC === 5 && timeInMinutes >= marketCloseMin) {
+    return { open: false, reason: 'Péntek este 21:00 UTC után - piac zárva hétvégén' };
+  }
+
+  // Általános hétköznap ellenőrzés: 13:30 - 21:00 UTC
+  if (dayUTC >= 1 && dayUTC <= 5) {
+    if (timeInMinutes < marketOpenMin) {
+      return { open: false, reason: `Hétköznap ${(marketOpenMin / 60).toFixed(2).replace('.', ':')} UTC előtt - piac zárva` };
+    }
+    if (timeInMinutes >= marketCloseMin && dayUTC !== 5) {
+      // After hours hétköznap (kivéve péntek)
+      // Ha 21:00 - 23:59 UTC, akkor after hours NYITVA
+      if (timeInMinutes < 24 * 60) {
+        return { open: true, reason: 'After hours (16:00-20:00 ET)' };
+      }
+      return { open: false, reason: 'Éjszaka - piac zárva' };
+    }
+    if (timeInMinutes >= marketCloseMin && dayUTC === 5) {
+      return { open: false, reason: 'Péntek 21:00 UTC után - piac zárva' };
+    }
+  }
+
+  // Nyitvatartási időszakok (13:30 - 21:00 UTC)
+  if (timeInMinutes >= marketOpenMin && timeInMinutes < 14 * 60 + 30) {
+    return { open: true, reason: 'Pre-market (04:00-09:30 ET)' };
+  }
+  if (timeInMinutes >= 14 * 60 + 30 && timeInMinutes < marketCloseMin) {
+    return { open: true, reason: 'Regular hours (09:30-16:00 ET)' };
+  }
+
+  return { open: false, reason: 'Piac zárva (UTC idő: ' + now.toISOString() + ')' };
+}
+
 serve(async (req) => {
   console.log('Trading monitor started');
-  
+
+  // Piaci nyitvatartás ellenőrzése
+  const marketStatus = isMarketOpen();
+  if (!marketStatus.open) {
+    console.log('Market closed: ' + marketStatus.reason + ', skipping analysis');
+    return new Response(JSON.stringify({
+      skipped: true,
+      reason: marketStatus.reason,
+      market_closed: true,
+      timestamp: new Date().toISOString()
+    }), {
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+  console.log('Market status: ' + marketStatus.reason);
+
   // Stratégia és nyitott pozíciók lekérése
   const strategy = await getActiveStrategy();
   if (!strategy) {
