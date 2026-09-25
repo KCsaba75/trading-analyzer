@@ -81,20 +81,18 @@ export default function AnalysisModule() {
     loadStrategies();
   }, []);
 
-  // Egy ticker 15m elemzése - same-origin proxy-n keresztül (nincs CORS!)
+  // Egy ticker 15m elemzése - Supabase-js kliens invoke (CORS mentes!)
   const analyzeTicker = async (ticker: string, timeframe: string): Promise<AnalysisResult | null> => {
     try {
-      const resp = await fetch('/api/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ticker, timeframe }),
+      const { data, error } = await supabase.functions.invoke('analyze-stock', {
+        body: { ticker, timeframe },
       });
 
-      if (!resp.ok) {
-        console.error(`Analyze ${ticker} failed: HTTP ${resp.status}`);
+      if (error) {
+        console.error(`Analyze ${ticker} failed:`, error);
         return null;
       }
-      return await resp.json();
+      return data as AnalysisResult;
     } catch (e: any) {
       console.error(`Analysis failed for ${ticker}:`, e);
       return null;
