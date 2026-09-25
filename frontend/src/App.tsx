@@ -4,8 +4,9 @@ import StrategyModule from './modules/strategy/StrategyModule';
 import AnalysisModule from './modules/analysis/AnalysisModule';
 import EntryPointModule from './modules/entry-point/EntryPointModule';
 import PositionsModule from './modules/positions/PositionsModule';
+import WatchlistModule from './modules/watchlist/WatchlistModule';
 
-type ModuleId = 'strategy' | 'analysis' | 'entry' | 'positions';
+type ModuleId = 'strategy' | 'analysis' | 'entry' | 'positions' | 'watchlist';
 
 const MODULES: Record<ModuleId, { name: string; description: string; component: any; phase: number; status: 'active' | 'planned' }> = {
   strategy: {
@@ -22,10 +23,10 @@ const MODULES: Record<ModuleId, { name: string; description: string; component: 
     phase: 2,
     status: 'active',
   },
-  entry: {
-    name: '3. Belépési pont',
-    description: 'Ajánlott ár, stop-loss, take-profit',
-    component: EntryPointModule,
+  watchlist: {
+    name: '3. Figyelőlista',
+    description: 'Tickerek és timeframes kezelése',
+    component: WatchlistModule,
     phase: 3,
     status: 'active',
   },

@@ -154,3 +154,55 @@ export const positionsApi = {
     if (error) throw error;
   },
 };
+
+// CRUD helper a watchlist táblához
+export const watchlistApi = {
+  async list() {
+    const { data, error } = await supabase
+      .from('watchlist')
+      .select('*')
+      .order('ticker', { ascending: true });
+    if (error) throw error;
+    return data ?? [];
+  },
+
+  async create(item: { ticker: string; timeframe: string; is_active: boolean }) {
+    const { data, error } = await supabase
+      .from('watchlist')
+      .insert({ ...item, last_alert_at: null })
+      .select()
+      .single();
+    if (error) throw error;
+    return data;
+  },
+
+  async update(id: string, updates: Partial<{ ticker: string; timeframe: string; is_active: boolean }>) {
+    const { data, error } = await supabase
+      .from('watchlist')
+      .update(updates)
+      .eq('id', id)
+      .select()
+      .single();
+    if (error) throw error;
+    return data;
+  },
+
+  async toggleActive(id: string, isActive: boolean) {
+    const { data, error } = await supabase
+      .from('watchlist')
+      .update({ is_active: isActive })
+      .eq('id', id)
+      .select()
+      .single();
+    if (error) throw error;
+    return data;
+  },
+
+  async delete(id: string) {
+    const { error } = await supabase
+      .from('watchlist')
+      .delete()
+      .eq('id', id);
+    if (error) throw error;
+  },
+};
