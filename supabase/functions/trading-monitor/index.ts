@@ -176,6 +176,14 @@ async function sendTelegram(chatId: string, message: string) {
 async function openPosition(ticker: string, direction: 'BUY' | 'SELL', entryPrice: number, quantity: number, strategy: ActiveStrategy): Promise<boolean> {
   try {
     const url = SUPABASE_URL + '/rest/v1/positions';
+    const positionValue = strategy.initial_capital * (strategy.position_size_pct / 100);
+    // Pozíció méret USD-ben tárolva, és take_profit szintek kiszámítása
+    const sl = direction === 'BUY' ? entryPrice * (1 - strategy.stop_loss_pct / 100) : entryPrice * (1 + strategy.stop_loss_pct / 100);
+    const tp1 = direction === 'BUY' ? entryPrice * (1 + strategy.take_profit_pct * 0.5 / 100) : entryPrice * (1 - strategy.take_profit_pct * 0.5 / 100);
+    const tp2 = direction === 'BUY' ? entryPrice * (1 + strategy.take_profit_pct / 100) : entryPrice * (1 - strategy.take_profit_pct / 100);
+    const tp3 = direction === 'BUY' ? entryPrice * (1 + strategy.take_profit_pct * 2 / 100) : entryPrice * (1 - strategy.take_profit_pct * 2 / 100);
+    const rr = Math.abs(tp1 - entryPrice) / Math.abs(entryPrice - sl);
+
     const resp = await fetch(url, {
       method: 'POST',
       headers: {
@@ -185,12 +193,19 @@ async function openPosition(ticker: string, direction: 'BUY' | 'SELL', entryPric
       },
       body: JSON.stringify({
         ticker: ticker,
-        direction: direction,
+        strategy_id: strategy.id,
+        decision: direction,
+        confidence: 0.7,
+        timeframe: '15m',
         entry_price: entryPrice,
-        quantity: quantity,
-        stop_loss: direction === 'BUY' ? entryPrice * (1 - strategy.stop_loss_pct / 100) : entryPrice * (1 + strategy.stop_loss_pct / 100),
-        take_profit: direction === 'BUY' ? entryPrice * (1 + strategy.take_profit_pct / 100) : entryPrice * (1 - strategy.take_profit_pct / 100),
-        status: 'open'
+        stop_loss: sl,
+        take_profit_1: tp1,
+        take_profit_2: tp2,
+        take_profit_3: tp3,
+        position_size: positionValue,
+        risk_reward_ratio: rr,
+        status: 'pending',
+        reasoning: 'Auto-detected by trading-monitor (score + Jev AI)'
       })
     });
     if (!resp.ok) {
@@ -283,9 +298,12 @@ serve(async (req) => {
       continue;
     }
     
-    // Erős jel filter: csak ha a score elég magas
-    if (Math.abs(result.weighted_score) < 0.3) {
-      console.log('Signal for ' + item.ticker + ' is too weak, skipping');
+    // Erős jel filter: csak ha a score elég magas VAGY a Jev konfidencia magas
+    // 0.3 a score küszöb, vagy 0.6 a Jev konfidencia küszöb
+    const strongScore = Math.abs(result.weighted_score) >= 0.3;
+    const strongJev = result.jev_confidence >= 0.6;
+    if (!strongScore && !strongJev) {
+      console.log('Signal for ' + item.ticker + ' is too weak (score: ' + result.weighted_score.toFixed(3) + ', jev: ' + (result.jev_confidence * 100).toFixed(0) + '%), skipping');
       continue;
     }
 
