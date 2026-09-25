@@ -157,7 +157,12 @@ export default function PositionsModule() {
       return;
     }
     const pos = positions.find(p => p.id === positionId);
-    const pnl = pos ? (closePrice - pos.entry_price) * (pos.position_size || 1) : 0;
+    // P&L számítás: BUY esetén close-entry, SELL esetén entry-close
+    const direction = pos?.decision || 'BUY';
+    const directionMultiplier = direction === 'BUY' ? 1 : -1;
+    const pnl = pos
+      ? (closePrice - pos.entry_price) * (pos.position_size || 1) * directionMultiplier
+      : 0;
     const pnlStr = pnl >= 0 ? `+$${safeFixed(pnl, 2)} (nyereség)` : `-$${Math.abs(pnl).toFixed(2)} (veszteség)`;
 
     if (!confirm(`Lezárás ${ticker} @ ${safeFixed(closePrice, 2)}\n\nP&L: ${pnlStr}\n\nEz a P&L hozzáadódik a stratégia tőkéjéhez!\n\nBiztosan lezárod?`)) return;
